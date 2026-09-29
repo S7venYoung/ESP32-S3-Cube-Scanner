@@ -23,6 +23,7 @@ constexpr int kHeight = 240;
 struct Glyph { char c; uint8_t rows[7]; };
 constexpr Glyph kFont[] = {
     {' ',{0,0,0,0,0,0,0}}, {'-',{0,0,0,31,0,0,0}}, {'.',{0,0,0,0,0,12,12}}, {':',{0,12,12,0,12,12,0}},
+    {'?',{14,17,1,2,4,0,4}},
     {'0',{14,17,19,21,25,17,14}}, {'1',{4,12,4,4,4,4,14}}, {'2',{14,17,1,2,4,8,31}},
     {'3',{30,1,1,14,1,1,30}}, {'4',{2,6,10,18,31,2,2}}, {'5',{31,16,16,30,1,1,30}},
     {'6',{14,16,16,30,17,17,14}}, {'7',{31,1,2,4,8,8,8}}, {'8',{14,17,17,14,17,17,14}},
@@ -110,3 +111,4 @@ void CubeDisplay::Show(const std::string& title, const std::string& detail) {
     DrawText(pixels.data(), 12, 48, detail, 0xFFFF, 2);
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, 0, 0, kWidth, kHeight, pixels.data()));
 }
+
