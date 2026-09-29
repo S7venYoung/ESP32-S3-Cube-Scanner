@@ -1,0 +1,10 @@
+menu "Cube ZMK scanner"
+
+config ZMK_SCANNER_NAME_FILTER
+    string "Advertised name filter"
+    default ""
+    help
+        Only show BLE devices whose advertised complete or shortened local
+        name contains this text. Leave empty to show all named devices.
+
+endmenu
