@@ -1,0 +1,40 @@
+name: Build ESP32-S3 scanner firmware
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and package firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build and merge ESP-IDF images
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.2.2
+          target: esp32s3
+          path: .
+          command: idf.py build merge-bin -o build/ESP32-S3-Cube-Scanner.bin
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ESP32-S3-Cube-Scanner-firmware
+          path: |
+            build/ESP32-S3-Cube-Scanner.bin
+            build/esp32_s3_cube_scanner.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/flash_args
+          if-no-files-found: error
+          retention-days: 30
+
