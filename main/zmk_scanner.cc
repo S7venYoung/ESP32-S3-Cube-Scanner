@@ -1,5 +1,6 @@
 #include "zmk_scanner.h"
 
+#include <cstdio>
 #include <string>
 
 #include <esp_log.h>
@@ -32,8 +33,10 @@ int OnGapEvent(struct ble_gap_event* event, void*) {
     std::string name(reinterpret_cast<const char*>(fields.name), fields.name_len);
     if (!name_filter.empty() && name.find(name_filter) == std::string::npos) return 0;
 
-    char address[BLE_ADDR_STR_LEN] = {};
-    ble_addr_to_str(&event->disc.addr, address);
+    char address[18] = {};
+    const uint8_t* value = event->disc.addr.val;
+    std::snprintf(address, sizeof(address), "%02X:%02X:%02X:%02X:%02X:%02X",
+                  value[5], value[4], value[3], value[2], value[1], value[0]);
     Show(name, std::string(address) + "\nRSSI " + std::to_string(event->disc.rssi) + " dBm");
     return 0;
 }
@@ -70,3 +73,4 @@ void StartZmkScanner(CubeDisplay& display) {
     ble_hs_cfg.sync_cb = OnSync;
     nimble_port_freertos_init(HostTask);
 }
+
