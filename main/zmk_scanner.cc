@@ -1,7 +1,9 @@
 #include "zmk_scanner.h"
 
 #include <cstdio>
+#include <algorithm>
 #include <string>
+#include <vector>
 
 #include <esp_log.h>
 #include <host/ble_gap.h>
@@ -17,10 +19,15 @@ namespace {
 constexpr char kTag[] = "ZmkScanner";
 CubeDisplay* scanner_display;
 std::string name_filter = CONFIG_ZMK_SCANNER_NAME_FILTER;
+std::vector<ScannerDevice> devices;
 
 void Show(const std::string& name, const std::string& details) {
     ESP_LOGI(kTag, "%s: %s", name.c_str(), details.c_str());
     scanner_display->Show(name, details);
+}
+
+void RefreshDisplay() {
+    scanner_display->ShowScanner(devices, true, name_filter);
 }
 
 int OnGapEvent(struct ble_gap_event* event, void*) {
@@ -37,7 +44,22 @@ int OnGapEvent(struct ble_gap_event* event, void*) {
     const uint8_t* value = event->disc.addr.val;
     std::snprintf(address, sizeof(address), "%02X:%02X:%02X:%02X:%02X:%02X",
                   value[5], value[4], value[3], value[2], value[1], value[0]);
-    Show(name, std::string(address) + "\nRSSI " + std::to_string(event->disc.rssi) + " dBm");
+    auto existing = std::find_if(devices.begin(), devices.end(), [&address](const ScannerDevice& device) {
+        return device.address == address;
+    });
+    if (existing != devices.end()) {
+        existing->name = name;
+        existing->rssi = event->disc.rssi;
+    } else {
+        ScannerDevice device{name, address, event->disc.rssi};
+        if (devices.size() < 2) {
+            devices.push_back(std::move(device));
+        } else {
+            devices.erase(devices.begin());
+            devices.push_back(std::move(device));
+        }
+    }
+    RefreshDisplay();
     return 0;
 }
 
@@ -68,9 +90,9 @@ void HostTask(void*) {
 
 void StartZmkScanner(CubeDisplay& display) {
     scanner_display = &display;
+    scanner_display->ShowScanner(devices, true, name_filter);
     ESP_ERROR_CHECK(nimble_port_init());
     ble_svc_gap_device_name_set("Cube ZMK Scanner");
     ble_hs_cfg.sync_cb = OnSync;
     nimble_port_freertos_init(HostTask);
 }
-

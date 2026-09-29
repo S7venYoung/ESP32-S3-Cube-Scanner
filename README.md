@@ -1,8 +1,12 @@
 # ESP32-S3 Cube ZMK Scanner
 
-Standalone BLE scanner firmware for the NologoTech Xingzhi Cube 2.0 TFT (ESP32-S3). It discovers named BLE advertisements from ZMK split keyboard halves and shows the advertised name, BLE address, and signal strength on the 240 × 292 display.
+Standalone BLE scanner firmware for the NologoTech Xingzhi Cube 2.0 TFT
+(ESP32-S3). It discovers named BLE advertisements from ZMK split keyboard
+halves and shows the advertised name, BLE address, and signal strength on the
+240 × 292 display.
 
-This is an observer. ZMK split key events travel over an encrypted connection, so the scanner reports presence and signal strength rather than key presses.
+This is an observer. ZMK split key events travel over an encrypted connection,
+so the scanner reports presence and signal strength rather than key presses.
 
 ## Build and flash
 
@@ -14,9 +18,12 @@ idf.py menuconfig
 idf.py build flash monitor
 ```
 
-Set `Cube ZMK scanner -> Advertised name filter` to a substring from the keyboard's advertised BLE name. Leave it empty to show every named BLE device.
+Set `Cube ZMK scanner -> Advertised name filter` to a substring from the
+keyboard's advertised BLE name. Leave it empty to show every named BLE device.
 
 ## Cube 2.0 TFT wiring
+
+The display pins match the Xingzhi Cube 2.0 TFT Wi-Fi board definition:
 
 | Signal | ESP32-S3 GPIO |
 | --- | ---: |
@@ -27,4 +34,5 @@ Set `Cube ZMK scanner -> Advertised name filter` to a substring from the keyboar
 | LCD reset | 18 |
 | Backlight | 13 |
 
-The display uses ST7789, 292 × 240 pixels, SPI mode 3. BLE scanning uses the ESP-IDF NimBLE observer role.
+The display uses ST7789, 292 × 240 pixels, SPI mode 3. BLE scanning uses the
+ESP-IDF NimBLE observer role.

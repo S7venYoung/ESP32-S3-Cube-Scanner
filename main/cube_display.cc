@@ -1,7 +1,7 @@
 #include "cube_display.h"
 
 #include <algorithm>
-#include <cstring>
+#include <cmath>
 #include <vector>
 
 #include <driver/gpio.h>
@@ -19,11 +19,22 @@ constexpr gpio_num_t kBacklight = GPIO_NUM_13;
 constexpr int kWidth = 292;
 constexpr int kHeight = 240;
 
+constexpr uint16_t Rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+constexpr uint16_t kInk = Rgb565(16, 20, 17);
+constexpr uint16_t kYellow = Rgb565(255, 191, 24);
+constexpr uint16_t kPaper = Rgb565(243, 238, 229);
+constexpr uint16_t kMuted = Rgb565(109, 116, 110);
+constexpr uint16_t kGreen = Rgb565(88, 232, 93);
+constexpr uint16_t kCard = Rgb565(30, 37, 32);
+
 // Small built-in 5x7 font for uppercase ASCII, digits and punctuation.
 struct Glyph { char c; uint8_t rows[7]; };
 constexpr Glyph kFont[] = {
     {' ',{0,0,0,0,0,0,0}}, {'-',{0,0,0,31,0,0,0}}, {'.',{0,0,0,0,0,12,12}}, {':',{0,12,12,0,12,12,0}},
     {'?',{14,17,1,2,4,0,4}},
+    {'/',{1,1,2,4,8,16,16}}, {'%',{17,2,4,8,17,0,0}}, {'=',{0,0,31,0,31,0,0}},
     {'0',{14,17,19,21,25,17,14}}, {'1',{4,12,4,4,4,4,14}}, {'2',{14,17,1,2,4,8,31}},
     {'3',{30,1,1,14,1,1,30}}, {'4',{2,6,10,18,31,2,2}}, {'5',{31,16,16,30,1,1,30}},
     {'6',{14,16,16,30,17,17,14}}, {'7',{31,1,2,4,8,8,8}}, {'8',{14,17,17,14,17,17,14}},
@@ -69,6 +80,111 @@ void DrawText(uint16_t* pixels, int x, int y, const std::string& text, uint16_t 
         x += 6 * scale;
     }
 }
+
+void FillRect(uint16_t* pixels, int x, int y, int w, int h, uint16_t color) {
+    const int x0 = std::max(0, x), y0 = std::max(0, y);
+    const int x1 = std::min(kWidth, x + w), y1 = std::min(kHeight, y + h);
+    for (int py = y0; py < y1; ++py)
+        std::fill(pixels + py * kWidth + x0, pixels + py * kWidth + x1, color);
+}
+
+void FillRoundRect(uint16_t* pixels, int x, int y, int w, int h, int radius, uint16_t color) {
+    for (int py = 0; py < h; ++py) {
+        for (int px = 0; px < w; ++px) {
+            const int cx = px < radius ? radius : (px >= w - radius ? w - radius - 1 : px);
+            const int cy = py < radius ? radius : (py >= h - radius ? h - radius - 1 : py);
+            const int dx = px - cx, dy = py - cy;
+            if (dx * dx + dy * dy <= radius * radius)
+                pixels[(y + py) * kWidth + x + px] = color;
+        }
+    }
+}
+
+void StrokeRoundRect(uint16_t* pixels, int x, int y, int w, int h, int radius,
+                     int thickness, uint16_t color) {
+    FillRoundRect(pixels, x, y, w, h, radius, color);
+    FillRoundRect(pixels, x + thickness, y + thickness, w - 2 * thickness,
+                  h - 2 * thickness, std::max(1, radius - thickness), kCard);
+}
+
+void FillCircle(uint16_t* pixels, int cx, int cy, int radius, uint16_t color) {
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            if (x * x + y * y <= radius * radius) {
+                const int px = cx + x, py = cy + y;
+                if (px >= 0 && px < kWidth && py >= 0 && py < kHeight)
+                    pixels[py * kWidth + px] = color;
+            }
+        }
+    }
+}
+
+void CircleOutline(uint16_t* pixels, int cx, int cy, int radius, int thickness, uint16_t color) {
+    const int outer = radius * radius;
+    const int inner = std::max(0, radius - thickness) * std::max(0, radius - thickness);
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            const int distance = x * x + y * y;
+            const int px = cx + x, py = cy + y;
+            if (distance <= outer && distance >= inner && px >= 0 && px < kWidth &&
+                py >= 0 && py < kHeight) pixels[py * kWidth + px] = color;
+        }
+    }
+}
+
+void DrawEye(uint16_t* pixels, int x) {
+    FillRoundRect(pixels, x, 12, 27, 25, 8, kInk);
+    FillCircle(pixels, x + 13, 24, 8, kYellow);
+    FillCircle(pixels, x + 13, 24, 3, kInk);
+}
+
+void DrawSignalBars(uint16_t* pixels, int x, int y, int rssi) {
+    const int level = std::clamp((rssi + 100) * 5 / 65, 0, 5);
+    for (int i = 0; i < 5; ++i) {
+        const int height = 3 + i * 2;
+        FillRoundRect(pixels, x + i * 7, y + 10 - height, 4, height, 1,
+                      i < level ? (rssi < -82 ? kYellow : kGreen) : kMuted);
+    }
+}
+
+std::string Truncate(const std::string& value, size_t max_chars) {
+    if (value.size() <= max_chars) return value;
+    if (max_chars < 4) return value.substr(0, max_chars);
+    return value.substr(0, max_chars - 3) + "...";
+}
+
+void DrawHeader(uint16_t* pixels) {
+    FillRoundRect(pixels, 9, 6, 274, 40, 11, kYellow);
+    DrawEye(pixels, 17);
+    DrawEye(pixels, 49);
+    DrawText(pixels, 91, 18, "WALLE // CODEX", kInk, 2);
+}
+
+void DrawDeviceCard(uint16_t* pixels, const ScannerDevice& device, int index, int y) {
+    FillRoundRect(pixels, 10, y, 272, 51, 9, kMuted);
+    FillRoundRect(pixels, 11, y + 1, 270, 49, 8, kCard);
+    FillRoundRect(pixels, 17, y + 12, 23, 23, 5, kYellow);
+    DrawText(pixels, 24, y + 17, std::to_string(index + 1), kInk, 1);
+    DrawText(pixels, 49, y + 8, Truncate(device.name, 12), kPaper, 2);
+    DrawText(pixels, 49, y + 31, device.address, kMuted, 1);
+
+    const std::string rssi = std::to_string(device.rssi);
+    DrawText(pixels, 218, y + 9, rssi, device.rssi < -82 ? kYellow : kGreen, 2);
+    DrawText(pixels, 268, y + 14, "D", kMuted, 1);
+    DrawSignalBars(pixels, 214, y + 34, device.rssi);
+}
+
+void DrawRadar(uint16_t* pixels) {
+    CircleOutline(pixels, 146, 105, 38, 2, kMuted);
+    CircleOutline(pixels, 146, 105, 27, 2, kMuted);
+    CircleOutline(pixels, 146, 105, 15, 2, kMuted);
+    FillCircle(pixels, 146, 105, 4, kYellow);
+    for (int i = 0; i < 26; ++i) {
+        const int x = 146 + i;
+        const int y = 105 - i / 2;
+        FillCircle(pixels, x, y, 2, (i % 4 == 0) ? kYellow : kGreen);
+    }
+}
 }  // namespace
 
 void CubeDisplay::Initialize() {
@@ -112,3 +228,32 @@ void CubeDisplay::Show(const std::string& title, const std::string& detail) {
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, 0, 0, kWidth, kHeight, pixels.data()));
 }
 
+void CubeDisplay::ShowScanner(const std::vector<ScannerDevice>& devices, bool scanning,
+                              const std::string& name_filter) {
+    std::vector<uint16_t> pixels(kWidth * kHeight, kInk);
+    DrawHeader(pixels.data());
+
+    if (devices.empty()) {
+        DrawRadar(pixels.data());
+        DrawText(pixels.data(), 55, 144, scanning ? "SEARCHING" : "SCAN PAUSED", kPaper, 2);
+        DrawText(pixels.data(), 67, 163, "FOR ZMK NODES", kYellow, 1);
+    } else {
+        DrawDeviceCard(pixels.data(), devices[0], 0, 54);
+        if (devices.size() > 1) {
+            DrawDeviceCard(pixels.data(), devices[1], 1, 111);
+        } else {
+            FillRoundRect(pixels.data(), 10, 111, 272, 51, 9, kMuted);
+            FillRoundRect(pixels.data(), 11, 112, 270, 49, 8, kCard);
+            DrawText(pixels.data(), 27, 132, "WAITING FOR PEER", kMuted, 2);
+        }
+    }
+
+    FillRoundRect(pixels.data(), 10, 174, 272, 54, 7, kCard);
+    FillCircle(pixels.data(), 23, 190, 5, scanning ? kGreen : kYellow);
+    DrawText(pixels.data(), 35, 184, scanning ? "SCANNING" : "PAUSED", kPaper, 2);
+    DrawText(pixels.data(), 213, 187, "ZMK BLE", kYellow, 1);
+    const std::string filter = name_filter.empty() ? "ALL NAMED DEVICES" : Truncate(name_filter, 29);
+    DrawText(pixels.data(), 18, 209, "FILTER: " + filter, kMuted, 1);
+
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, 0, 0, kWidth, kHeight, pixels.data()));
+}
