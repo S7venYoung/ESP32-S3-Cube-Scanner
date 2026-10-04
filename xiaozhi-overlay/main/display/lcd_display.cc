@@ -997,7 +997,7 @@ void LcdDisplay::SetupScannerDashboard(lv_obj_t* screen) {
         scanner_address_labels_[i] = ScannerText(card, "ZMK BLE ADVERTISEMENT",
             &BUILTIN_TEXT_FONT, kScannerMuted, 37, 25, 145);
         scanner_rssi_labels_[i] = ScannerText(card, "-- dBm", &BUILTIN_TEXT_FONT,
-                                               kScannerGreen, 183, 7, 45);
+                                               kScannerGreen, 183, 7, 72);
         for (int j = 0; j < 5; ++j) {
             const int bar_height = 4 + j * 2;
             scanner_signal_bars_[i][j] = ScannerPanel(card, 230 + j * 6,
