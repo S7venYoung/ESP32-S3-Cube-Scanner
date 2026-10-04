@@ -43,7 +43,7 @@ lv_obj_t* ScannerPanel(lv_obj_t* parent, int x, int y, int width, int height,
     lv_obj_set_style_border_color(panel, lv_color_hex(border), 0);
     lv_obj_set_style_radius(panel, radius, 0);
     lv_obj_set_style_pad_all(panel, 0, 0);
-    lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(panel, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     return panel;
 }
 
@@ -59,7 +59,7 @@ lv_obj_t* ScannerText(lv_obj_t* parent, const char* text, const lv_font_t* font,
         lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_height(label, font->line_height);
     }
-    lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(label, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     return label;
 }
 
@@ -71,7 +71,7 @@ lv_obj_t* ScannerDot(lv_obj_t* parent, int x, int y, int size, uint32_t color) {
     lv_obj_set_style_bg_color(dot, lv_color_hex(color), 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(dot, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     return dot;
 }
 }  // namespace
@@ -965,7 +965,7 @@ void LcdDisplay::SetupScannerDashboard(lv_obj_t* screen) {
     lv_obj_set_style_bg_opa(scanner_dashboard_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(scanner_dashboard_, 0, 0);
     lv_obj_set_style_border_width(scanner_dashboard_, 0, 0);
-    lv_obj_remove_flag(scanner_dashboard_, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(scanner_dashboard_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
 
     lv_obj_t* header = ScannerPanel(scanner_dashboard_, 8, 7, 276, 37,
                                     kScannerYellow, kScannerYellow, 9);

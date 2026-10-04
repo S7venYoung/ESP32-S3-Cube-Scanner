@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <esp_log.h>
+#include <esp_err.h>
 #include <esp_timer.h>
 #include <host/ble_gap.h>
 #include <host/ble_hs.h>
