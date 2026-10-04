@@ -1,0 +1,61 @@
+name: Build Xiaozhi Cube Codex firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - xiaozhi-overlay/**
+      - .github/workflows/build-xiaozhi-codex.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Xiaozhi AI and Codex scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out scanner integration
+        uses: actions/checkout@v4
+
+      - name: Check out pinned Cube Xiaozhi source
+        uses: actions/checkout@v4
+        with:
+          repository: NologoTech/xingzhi-cube-2.0tft
+          ref: e75ac5e1f178eeab461f1cf9561dbd39bf0de489
+          path: firmware
+
+      - name: Apply Xiaozhi scanner integration
+        run: cp -a xiaozhi-overlay/. firmware/
+
+      - name: Build and merge complete firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.2
+          target: esp32s3
+          path: firmware
+          command: >-
+            idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.cube-scanner" -D BOARD_NAME=xingzhi-cube-2.0tft-combine-wifi build
+            && idf.py merge-bin
+            && cp build/xiaozhi.bin build/xiaozhi_cube_codex.bin
+            && cd build
+            && sha256sum merged-binary.bin xiaozhi_cube_codex.bin > SHA256SUMS
+
+      - name: Upload complete firmware and application
+        uses: actions/upload-artifact@v4
+        with:
+          name: Xiaozhi-Cube-Codex-firmware
+          path: |
+            firmware/build/merged-binary.bin
+            firmware/build/xiaozhi_cube_codex.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+            firmware/build/flash_args
+            firmware/build/flasher_args.json
+            firmware/build/sdkconfig
+            firmware/build/SHA256SUMS
+            firmware/docs/zmk-scanner.md
+          if-no-files-found: error
+          retention-days: 30
