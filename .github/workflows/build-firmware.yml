@@ -1,9 +1,8 @@
-name: Build ESP32-S3 scanner firmware
+name: Build Zhengchen 1.54 Xiaozhi Codex firmware
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,30 +10,38 @@ permissions:
 
 jobs:
   build:
-    name: Build and package firmware
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Build and merge ESP-IDF images
+      - uses: actions/checkout@v4
+      - name: Build Zhengchen Wi-Fi firmware and complete image
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.2.2
+          esp_idf_version: v5.4.2
           target: esp32s3
           path: .
-          command: idf.py build && cd build && python -m esptool --chip esp32s3 merge_bin -o merged-binary.bin --flash_mode qio --flash_freq 80m --flash_size 16MB 0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0x10000 esp32_s3_cube_scanner.bin
-
-      - name: Upload firmware artifacts
+          command: >-
+            idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.scanner" -D BOARD_NAME=zhengchen-1.54tft-wifi build
+            && idf.py merge-bin
+            && cp build/xiaozhi.bin build/zhengchen_154_wifi_codex.bin
+            && cd build
+            && sha256sum merged-binary.bin zhengchen_154_wifi_codex.bin > SHA256SUMS
+      - name: Package firmware, models and flash metadata
         uses: actions/upload-artifact@v4
         with:
-          name: ESP32-S3-Cube-Scanner-firmware
+          name: Zhengchen-154-WiFi-Codex-firmware
           path: |
             build/merged-binary.bin
-            build/esp32_s3_cube_scanner.bin
+            build/zhengchen_154_wifi_codex.bin
+            build/xiaozhi.bin
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            build/srmodels/srmodels.bin
             build/flash_args
+            build/flasher_args.json
+            build/SHA256SUMS
+            sdkconfig
+            docs/codex-scanner.md
           if-no-files-found: error
           retention-days: 30
-
