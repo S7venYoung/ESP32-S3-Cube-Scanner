@@ -27,7 +27,7 @@ private:
     lv_obj_t* quota_text_ = nullptr;
     lv_obj_t* week_text_ = nullptr;
     lv_obj_t* tokens_text_ = nullptr;
-    lv_obj_t* quota_bar_ = nullptr;
+    lv_obj_t* week_segments_[6] = {};
     lv_obj_t* dashboard_ = nullptr;
     lv_obj_t* assistant_dot_ = nullptr;
     lv_obj_t* scan_dot_ = nullptr;

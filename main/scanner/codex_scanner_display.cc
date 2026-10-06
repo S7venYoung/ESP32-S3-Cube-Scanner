@@ -3,6 +3,7 @@
 #include "application.h"
 #include "board.h"
 #include "codex_metrics.h"
+#include "codex_draw.h"
 #include <esp_timer.h>
 #include <algorithm>
 #include <cstdio>
@@ -12,7 +13,7 @@ LV_FONT_DECLARE(font_puhui_14_1);
 
 namespace {
 constexpr uint32_t kInk = 0x101411;
-constexpr uint32_t kCard = 0x1E2520;
+constexpr uint32_t kCard = 0x101411;
 constexpr uint32_t kYellow = 0xFFBF18;
 constexpr uint32_t kPaper = 0xF3EEE5;
 constexpr uint32_t kMuted = 0x7C847D;
@@ -41,6 +42,18 @@ lv_obj_t* Text(lv_obj_t* parent, const char* text, int x, int y, int w, uint32_t
     lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
     return obj;
 }
+
+lv_obj_t* Impact(lv_obj_t* parent, const char* text, int x, int y, int w,
+                 uint32_t color, int size = 16, bool centered = false) {
+    return CodexDrawText(parent, text, x, y, w, color, size, centered);
+}
+
+lv_obj_t* Outline(lv_obj_t* parent, int x, int y, int w, int h, uint32_t border, int radius = 10) {
+    auto* obj = Panel(parent, x, y, w, h, kCard, radius);
+    lv_obj_set_style_border_width(obj, 1, 0);
+    lv_obj_set_style_border_color(obj, lv_color_hex(border), 0);
+    return obj;
+}
 }  // namespace
 
 void CodexScannerDisplay::SetupUI() {
@@ -51,36 +64,41 @@ void CodexScannerDisplay::SetupUI() {
     if (dashboard_ != nullptr) return;
     lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
     dashboard_ = Panel(lv_screen_active(), 0, 0, width_, height_, kInk, 0);
-    auto* header = Panel(dashboard_, 6, 6, 228, 33, kInk);
-    Text(header, "CODEX // SOFLE", 2, 8, 145, kYellow);
-    scan_dot_ = Panel(header, 145, 12, 6, 6, kMuted, 4);
-    scan_status_ = Text(header, "OFFLINE", 155, 8, 66, kPaper);
-    assistant_dot_ = Panel(dashboard_, 224, 2, 7, 7, kMuted, 4);
-    Panel(dashboard_, 8, 40, 224, 1, kMuted, 0);
+    Impact(dashboard_, "CODEX", 10, 9, 56, kYellow, 20);
+    Impact(dashboard_, "// SOFLE", 68, 9, 87, kPaper, 20);
+    scan_dot_ = Panel(dashboard_, 226, 16, 7, 7, kMuted, 4);
+    scan_status_ = Impact(dashboard_, "OFFLINE", 169, 12, 53, kPaper);
+    assistant_dot_ = Panel(dashboard_, 230, 3, 5, 5, kMuted, 3);
+    Panel(dashboard_, 10, 36, 220, 2, kYellow, 0);
 
-    auto* left = Panel(dashboard_, 6, 47, 110, 130, kCard);
-    Text(left, "5 HOUR LEFT", 6, 7, 101, kPaper);
-    quota_text_ = Text(left, "--", 7, 33, 102, kYellow);
-    lv_obj_set_style_text_font(quota_text_, &lv_font_montserrat_32, 0);
-    lv_obj_set_height(quota_text_, 40);
-    Panel(left, 6, 80, 98, 1, kMuted, 0);
-    Text(left, "7 DAY", 6, 87, 50, kPaper);
-    week_text_ = Text(left, "--", 58, 87, 49, kYellow);
-    Panel(left, 6, 112, 98, 7, kMuted, 2);
-    quota_bar_ = Panel(left, 6, 112, 1, 7, kYellow, 2);
-    lv_obj_add_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
+    auto* left = Outline(dashboard_, 6, 44, 110, 126, kYellow, 12);
+    Impact(left, "5 HOUR LEFT", 6, 6, 98, kPaper);
+    quota_text_ = Impact(left, "--%", 1, 26, 106, kYellow, 48, true);
+    Panel(left, 6, 82, 96, 1, kMuted, 0);
+    Impact(left, "7 DAY LEFT", 6, 87, 61, kPaper);
+    week_text_ = Impact(left, "--%", 66, 84, 40, kYellow, 20);
+    for (int i = 0; i < 6; ++i) {
+        week_segments_[i] = Panel(left, 6 + i * 16, 111, 14, 6, kMuted, 1);
+    }
 
-    auto* right = Panel(dashboard_, 122, 47, 112, 130, kCard);
-    Text(right, "TODAY TOTAL", 6, 7, 104, kPaper);
-    tokens_text_ = Text(right, "--", 5, 43, 106, kPaper);
-    lv_obj_set_style_text_font(tokens_text_, &lv_font_montserrat_24, 0);
-    lv_obj_set_height(tokens_text_, 32);
-    Text(right, "TOKENS", 6, 88, 100, kMuted);
+    auto* right = Outline(dashboard_, 122, 44, 112, 126, kYellow, 12);
+    Impact(right, "TODAY TOTAL", 6, 6, 100, kPaper);
+    tokens_text_ = Impact(right, "--", 2, 38, 106, kPaper, 48, true);
+    Impact(right, "TOKENS", 6, 98, 98, kMuted, 16, true);
 
-    auto* footer = Panel(dashboard_, 6, 184, 228, 50, kCard);
-    Text(footer, "LAYER --  WPM --", 5, 5, 155, kPaper);
-    battery_text_ = Text(footer, "BAT --%", 161, 5, 65, kYellow);
-    Text(footer, "L --%       R --%", 5, 27, 215, kMuted);
+    auto* state = Outline(dashboard_, 6, 177, 228, 25, kMuted, 7);
+    Impact(state, "LAYER", 7, 4, 42, kMuted);
+    Impact(state, "--", 52, 2, 55, kYellow, 20);
+    Panel(state, 118, 4, 1, 16, kMuted, 0);
+    Impact(state, "WPM", 132, 4, 35, kMuted);
+    Impact(state, "--", 177, 2, 40, kYellow, 20);
+    for (int i = 0; i < 2; ++i) {
+        auto* battery = Outline(dashboard_, i == 0 ? 6 : 122, 208, i == 0 ? 110 : 112, 26, kMuted, 7);
+        Impact(battery, i == 0 ? "L" : "R", 7, 4, 13, kMuted);
+        Impact(battery, "--%", 24, 4, 35, kPaper);
+        Outline(battery, 66, 8, 33, 10, kMuted, 2);
+        Panel(battery, 99, 11, 2, 4, kMuted, 0);
+    }
 
     notice_panel_ = Panel(dashboard_, 8, 181, 224, 51, kYellow);
     notice_text_ = Text(notice_panel_, "", 7, 5, 210, kInk);
@@ -95,27 +113,27 @@ void CodexScannerDisplay::SetupUI() {
 void CodexScannerDisplay::UpdateMetrics() {
     if (quota_text_ == nullptr) return;
     const auto sample = GetCodexSnapshot();
-    lv_label_set_text(scan_status_, sample.transport);
+    CodexDrawSetText(scan_status_, sample.transport);
     lv_obj_set_style_bg_color(scan_dot_, lv_color_hex(sample.online ? kGreen : kMuted), 0);
     char text[32];
     if (sample.online && sample.metrics.left >= 0) std::snprintf(text, sizeof(text), "%d%%", sample.metrics.left);
-    else std::snprintf(text, sizeof(text), "--");
-    lv_label_set_text(quota_text_, text);
+    else std::snprintf(text, sizeof(text), "--%%");
+    CodexDrawSetText(quota_text_, text);
     if (sample.online && sample.metrics.week_left >= 0) {
         std::snprintf(text, sizeof(text), "%d%%", sample.metrics.week_left);
-        lv_obj_set_width(quota_bar_, std::max(1, sample.metrics.week_left * 98 / 100));
-        if (sample.metrics.week_left > 0) lv_obj_remove_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
     } else {
-        std::snprintf(text, sizeof(text), "--");
-        lv_obj_add_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
+        std::snprintf(text, sizeof(text), "--%%");
     }
-    lv_label_set_text(week_text_, text);
+    CodexDrawSetText(week_text_, text);
+    const int segments = sample.online && sample.metrics.week_left >= 0 ?
+        (sample.metrics.week_left * 6 + 99) / 100 : 0;
+    for (int i = 0; i < 6; ++i) lv_obj_set_style_bg_color(week_segments_[i],
+        lv_color_hex(i < segments ? kYellow : kMuted), 0);
     if (!sample.online || sample.metrics.tokens < 0) std::snprintf(text, sizeof(text), "--");
     else if (sample.metrics.tokens >= 1000000) std::snprintf(text, sizeof(text), "%.1fM", sample.metrics.tokens / 1000000.0);
     else if (sample.metrics.tokens >= 1000) std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
     else std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
-    lv_label_set_text(tokens_text_, text);
+    CodexDrawSetText(tokens_text_, text);
 }
 
 void CodexScannerDisplay::UpdateAssistantDot() {
@@ -176,7 +194,7 @@ void CodexScannerDisplay::Update() {
     UpdateAssistantDot();
     char text[24];
     UpdateMetrics();
-    if (has_battery) {
+    if (has_battery && battery_text_ != nullptr) {
         std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+ " : "BAT ", level);
         lv_label_set_text(battery_text_, text);
     }
