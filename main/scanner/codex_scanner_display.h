@@ -23,6 +23,11 @@ protected:
 
 private:
     void UpdateAssistantDot();  // Caller holds the LVGL lock.
+    void UpdateMetrics();
+    lv_obj_t* quota_text_ = nullptr;
+    lv_obj_t* week_text_ = nullptr;
+    lv_obj_t* tokens_text_ = nullptr;
+    lv_obj_t* quota_bar_ = nullptr;
     lv_obj_t* dashboard_ = nullptr;
     lv_obj_t* assistant_dot_ = nullptr;
     lv_obj_t* scan_dot_ = nullptr;

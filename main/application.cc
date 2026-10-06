@@ -398,6 +398,7 @@ void Application::Start() {
 
 #if CONFIG_ZMK_SCANNER_MODE
     StartZmkScanner();
+    StartCodexSync();
 #endif
 
     /* Wait for the network to be ready */

@@ -2,6 +2,7 @@
 
 #include "application.h"
 #include "board.h"
+#include "codex_metrics.h"
 #include <esp_timer.h>
 #include <algorithm>
 #include <cstdio>
@@ -50,34 +51,36 @@ void CodexScannerDisplay::SetupUI() {
     if (dashboard_ != nullptr) return;
     lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
     dashboard_ = Panel(lv_screen_active(), 0, 0, width_, height_, kInk, 0);
-    auto* header = Panel(dashboard_, 8, 8, 224, 38, kYellow);
-    for (int i = 0; i < 2; ++i) {
-        const int x = 10 + i * 23;
-        Panel(header, x, 8, 20, 22, kInk, 5);
-        Panel(header, x + 5, 12, 10, 12, kYellow, 5);
-        Panel(header, x + 8, 16, 4, 4, kInk, 2);
-    }
-    Text(header, "WALLE // CODEX", 60, 11, 135, kInk);
-    assistant_dot_ = Panel(header, 207, 14, 9, 9, kMuted, 5);
+    auto* header = Panel(dashboard_, 6, 6, 228, 33, kInk);
+    Text(header, "CODEX // SOFLE", 2, 8, 145, kYellow);
+    scan_dot_ = Panel(header, 145, 12, 6, 6, kMuted, 4);
+    scan_status_ = Text(header, "OFFLINE", 155, 8, 66, kPaper);
+    assistant_dot_ = Panel(dashboard_, 224, 2, 7, 7, kMuted, 4);
+    Panel(dashboard_, 8, 40, 224, 1, kMuted, 0);
 
-    for (int i = 0; i < 2; ++i) {
-        auto* card = Panel(dashboard_, 8, 54 + i * 64, 224, 58, kCard);
-        Panel(card, 7, 19, 20, 20, kYellow, 10);
-        Text(card, i == 0 ? "1" : "2", 13, 21, 12, kInk);
-        device_names_[i] = Text(card, i == 0 ? "SEARCHING" : "WAITING FOR PEER", 34, 5, 181, kPaper);
-        addresses_[i] = Text(card, "ZMK BLE ADVERTISEMENT", 34, 23, 181, kMuted);
-        rssi_labels_[i] = Text(card, "-- dBm", 34, 41, 105, kGreen);
-        for (int j = 0; j < 5; ++j) {
-            const int h = 4 + j * 2;
-            bars_[i][j] = Panel(card, 180 + j * 7, 52 - h, 5, h, kMuted, 1);
-        }
-    }
+    auto* left = Panel(dashboard_, 6, 47, 110, 130, kCard);
+    Text(left, "5 HOUR LEFT", 6, 7, 101, kPaper);
+    quota_text_ = Text(left, "--", 7, 33, 102, kYellow);
+    lv_obj_set_style_text_font(quota_text_, &lv_font_montserrat_32, 0);
+    lv_obj_set_height(quota_text_, 40);
+    Panel(left, 6, 80, 98, 1, kMuted, 0);
+    Text(left, "7 DAY", 6, 87, 50, kPaper);
+    week_text_ = Text(left, "--", 58, 87, 49, kYellow);
+    Panel(left, 6, 112, 98, 7, kMuted, 2);
+    quota_bar_ = Panel(left, 6, 112, 1, 7, kYellow, 2);
+    lv_obj_add_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
 
-    auto* footer = Panel(dashboard_, 8, 184, 224, 48, kCard);
-    scan_dot_ = Panel(footer, 8, 9, 7, 7, kGreen, 4);
-    scan_status_ = Text(footer, "STARTING", 21, 5, 116, kPaper);
-    battery_text_ = Text(footer, "BAT --%", 143, 5, 75, kYellow);
-    filter_label_ = Text(footer, "FILTER: ALL", 8, 27, 208, kMuted);
+    auto* right = Panel(dashboard_, 122, 47, 112, 130, kCard);
+    Text(right, "TODAY TOTAL", 6, 7, 104, kPaper);
+    tokens_text_ = Text(right, "--", 5, 43, 106, kPaper);
+    lv_obj_set_style_text_font(tokens_text_, &lv_font_montserrat_24, 0);
+    lv_obj_set_height(tokens_text_, 32);
+    Text(right, "TOKENS", 6, 88, 100, kMuted);
+
+    auto* footer = Panel(dashboard_, 6, 184, 228, 50, kCard);
+    Text(footer, "LAYER --  WPM --", 5, 5, 155, kPaper);
+    battery_text_ = Text(footer, "BAT --%", 161, 5, 65, kYellow);
+    Text(footer, "L --%       R --%", 5, 27, 215, kMuted);
 
     notice_panel_ = Panel(dashboard_, 8, 181, 224, 51, kYellow);
     notice_text_ = Text(notice_panel_, "", 7, 5, 210, kInk);
@@ -86,6 +89,33 @@ void CodexScannerDisplay::SetupUI() {
     lv_obj_move_foreground(low_battery_popup_);
     lv_obj_move_foreground(high_temp_popup_);
     UpdateAssistantDot();
+    UpdateMetrics();
+}
+
+void CodexScannerDisplay::UpdateMetrics() {
+    if (quota_text_ == nullptr) return;
+    const auto sample = GetCodexSnapshot();
+    lv_label_set_text(scan_status_, sample.transport);
+    lv_obj_set_style_bg_color(scan_dot_, lv_color_hex(sample.online ? kGreen : kMuted), 0);
+    char text[32];
+    if (sample.online && sample.metrics.left >= 0) std::snprintf(text, sizeof(text), "%d%%", sample.metrics.left);
+    else std::snprintf(text, sizeof(text), "--");
+    lv_label_set_text(quota_text_, text);
+    if (sample.online && sample.metrics.week_left >= 0) {
+        std::snprintf(text, sizeof(text), "%d%%", sample.metrics.week_left);
+        lv_obj_set_width(quota_bar_, std::max(1, sample.metrics.week_left * 98 / 100));
+        if (sample.metrics.week_left > 0) lv_obj_remove_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        std::snprintf(text, sizeof(text), "--");
+        lv_obj_add_flag(quota_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_label_set_text(week_text_, text);
+    if (!sample.online || sample.metrics.tokens < 0) std::snprintf(text, sizeof(text), "--");
+    else if (sample.metrics.tokens >= 1000000) std::snprintf(text, sizeof(text), "%.1fM", sample.metrics.tokens / 1000000.0);
+    else if (sample.metrics.tokens >= 1000) std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
+    else std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
+    lv_label_set_text(tokens_text_, text);
 }
 
 void CodexScannerDisplay::UpdateAssistantDot() {
@@ -145,6 +175,7 @@ void CodexScannerDisplay::Update() {
     if (dashboard_ == nullptr) return;
     UpdateAssistantDot();
     char text[24];
+    UpdateMetrics();
     if (has_battery) {
         std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+ " : "BAT ", level);
         lv_label_set_text(battery_text_, text);
@@ -156,22 +187,7 @@ void CodexScannerDisplay::Update() {
 
 void CodexScannerDisplay::UpdateScanner(const std::vector<ScannerDevice>& devices, bool scanning,
                                       const std::string& filter) {
-    DisplayLockGuard lock(this);
-    if (dashboard_ == nullptr) return;
-    for (size_t i = 0; i < 2; ++i) {
-        const bool found = i < devices.size();
-        lv_label_set_text(device_names_[i], found ? devices[i].name.c_str() : (i == 0 ? "SEARCHING" : "WAITING FOR PEER"));
-        lv_label_set_text(addresses_[i], found ? devices[i].address.c_str() : "ZMK BLE ADVERTISEMENT");
-        char rssi[24];
-        if (found) std::snprintf(rssi, sizeof(rssi), "%d dBm", devices[i].rssi);
-        else std::snprintf(rssi, sizeof(rssi), "-- dBm");
-        lv_label_set_text(rssi_labels_[i], rssi);
-        const int strength = found ? std::clamp((devices[i].rssi + 100) * 5 / 65, 0, 5) : 0;
-        for (int j = 0; j < 5; ++j) {
-            lv_obj_set_style_bg_color(bars_[i][j], lv_color_hex(j < strength ? kGreen : kMuted), 0);
-        }
-    }
-    lv_label_set_text(scan_status_, scanning ? "SCAN ACTIVE" : "BLE ERROR");
-    lv_obj_set_style_bg_color(scan_dot_, lv_color_hex(scanning ? kGreen : kRed), 0);
-    lv_label_set_text(filter_label_, ("FILTER: " + (filter.empty() ? std::string("ALL") : filter)).c_str());
+    // BLE discovery alone cannot supply layers/WPM/batteries. Keep those
+    // fields unavailable until the real ZMK telemetry protocol is connected.
+    (void)devices; (void)scanning; (void)filter;
 }

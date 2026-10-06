@@ -26,7 +26,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
 set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing")
 
 if(CONFIG_ZMK_SCANNER_MODE)
-    list(APPEND SOURCES "scanner/zmk_scanner.cc" "scanner/codex_scanner_display.cc")
+    list(APPEND SOURCES "scanner/zmk_scanner.cc" "scanner/codex_scanner_display.cc" "scanner/codex_sync.cc")
 endif()
 
 # 添加 IOT 相关文件

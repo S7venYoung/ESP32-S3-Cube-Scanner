@@ -161,3 +161,8 @@
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
  </picture>
 </a>
+# Codex 额度仪表盘 / USB + Wi-Fi
+
+默认 240×240 黑黄仪表盘显示 5 小时剩余、每周剩余及今日 Token。小智在后台工作，AI 状态为小圆点。配套 macOS 程序：https://github.com/S7venYoung/prospector-codex-macos 。
+
+USB 使用 UART0 (115200, TX43/RX44)，须由 USB 转串口连接；GPIO20 是背光，不能开启原生 USB。Wi-Fi 使用局域网 HTTP 8765 + USB 配对码。详见 [双通道同步](docs/codex-sync.md)。键盘状态还未接入，显示 `--`。编译成功不代表实机验证完成。
