@@ -4,6 +4,7 @@
 
 #include <esp_err.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <host/ble_gap.h>
 #include <host/ble_hs.h>
@@ -95,6 +96,17 @@ void HostTask(void*) {
 }  // namespace
 
 void StartZmkScanner() {
+    // Discovery is optional (it currently supplies names/RSSI, not keyboard
+    // telemetry). Protect native HTTP/audio task stacks and DMA allocations.
+    const auto caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const size_t free = heap_caps_get_free_size(caps);
+    const size_t largest = heap_caps_get_largest_free_block(caps);
+    ESP_LOGI(kTag, "Before BLE: internal free=%u largest=%u",
+             static_cast<unsigned>(free), static_cast<unsigned>(largest));
+    if (free < 64 * 1024 || largest < 16 * 1024) {
+        ESP_LOGW(kTag, "Skipping optional BLE discovery to preserve native services");
+        return;
+    }
     // Kconfig restricts this implementation to the verified Zhengchen board.
     display = static_cast<CodexScannerDisplay*>(Board::GetInstance().GetDisplay());
     Refresh(false);

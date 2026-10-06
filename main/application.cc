@@ -21,6 +21,7 @@
 
 #include <cstring>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -397,12 +398,20 @@ void Application::Start() {
 #endif
 
 #if CONFIG_ZMK_SCANNER_MODE
-    StartZmkScanner();
     StartCodexSync();
+    ESP_LOGI(TAG, "Before native Wi-Fi: internal free=%u largest=%u",
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
 #endif
 
     /* Wait for the network to be ready */
     board.StartNetwork();
+
+#if CONFIG_ZMK_SCANNER_MODE
+    // AP provisioning waits here until reboot. Never initialize the BLE
+    // controller/host before the native configuration HTTP task is created.
+    StartZmkScanner();
+#endif
 
     // Check for new firmware version or get the MQTT broker address
     CheckNewVersion();
