@@ -27,14 +27,16 @@ jobs:
           command: >-
             idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.scanner" -D BOARD_NAME=zhengchen-1.54tft-wifi build
             && idf.py merge-bin
-            && grep -qx 'CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y' sdkconfig
-            && grep -qx 'CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024' sdkconfig
-            && grep -qx 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' sdkconfig
-            && grep -qx '# CONFIG_BT_NIMBLE_ROLE_CENTRAL is not set' sdkconfig
-            && grep -qx '# CONFIG_BT_NIMBLE_ROLE_PERIPHERAL is not set' sdkconfig
             && cp build/xiaozhi.bin build/zhengchen_154_wifi_codex.bin
             && cd build
             && sha256sum merged-binary.bin zhengchen_154_wifi_codex.bin > SHA256SUMS
+      - name: Verify startup memory settings
+        run: |
+          grep -qx 'CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y' sdkconfig
+          grep -qx 'CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024' sdkconfig
+          grep -qx 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' sdkconfig
+          grep -qx '# CONFIG_BT_NIMBLE_ROLE_CENTRAL is not set' sdkconfig
+          grep -qx '# CONFIG_BT_NIMBLE_ROLE_PERIPHERAL is not set' sdkconfig
       - name: Package firmware, models and flash metadata
         uses: actions/upload-artifact@v4
         with:
