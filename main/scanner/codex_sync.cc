@@ -26,7 +26,9 @@ bool Apply(const char* line, bool is_usb) {
     CodexMetrics metrics;
     if (!ParseCodexFrame(line, metrics)) return false;
     std::lock_guard<std::mutex> lock(mutex);
-    (is_usb ? usb : wifi) = {metrics, esp_timer_get_time()};
+    auto& sample = is_usb ? usb : wifi;
+    sample.metrics = metrics;
+    sample.at = esp_timer_get_time();
     return true;
 }
 
@@ -79,7 +81,7 @@ void SyncTask(void*) {
     char bytes[64];
     for (;;) {
         if (server == nullptr && IpAddress() != "0.0.0.0") {
-            auto config = HTTPD_DEFAULT_CONFIG();
+            httpd_config_t config = HTTPD_DEFAULT_CONFIG();
             config.server_port = 8765;
             config.ctrl_port = 32769;
             config.max_uri_handlers = 2;
