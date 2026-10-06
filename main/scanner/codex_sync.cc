@@ -16,6 +16,7 @@ std::mutex mutex;
 struct Sample { CodexMetrics metrics; int64_t at = -1; } usb, wifi;
 std::string token;
 httpd_handle_t server = nullptr;
+bool uart_ready = false;
 
 bool Fresh(const Sample& s, int64_t now) {
     return s.at >= 0 && now - s.at < static_cast<int64_t>(s.metrics.ttl_seconds) * 1000000;
@@ -92,7 +93,9 @@ void SyncTask(void*) {
                 httpd_register_uri_handler(server, &update);
             }
         }
-        int count = uart_read_bytes(UART_NUM_0, bytes, sizeof(bytes), pdMS_TO_TICKS(200));
+        int count = 0;
+        if (uart_ready) count = uart_read_bytes(UART_NUM_0, bytes, sizeof(bytes), pdMS_TO_TICKS(200));
+        else vTaskDelay(pdMS_TO_TICKS(200));
         for (int i = 0; i < count; ++i) {
             const char c = bytes[i];
             if (c == '\n') {
@@ -137,6 +140,12 @@ CodexSnapshot GetCodexSnapshot() {
 }
 
 void StartCodexSync() {
+    // Netif lookup performs a TCP/IP IPC call. Initialize it before starting
+    // our task; native Wi-Fi initialization is idempotent and can reuse it.
+    if (esp_netif_init() != ESP_OK) {
+        ESP_LOGE("CodexSync", "Network stack initialization failed");
+        return;
+    }
     Settings settings("codex", true);
     token = settings.GetString("token");
     if (token.size() != 32) {
@@ -157,8 +166,7 @@ void StartCodexSync() {
         uart_set_pin(UART_NUM_0, 43, 44, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK ||
         (!uart_is_driver_installed(UART_NUM_0) && uart_driver_install(UART_NUM_0, 1024, 0, 0, nullptr, 0) != ESP_OK)) {
         ESP_LOGE("CodexSync", "UART0 initialization failed");
-        return;
-    }
+    } else uart_ready = true;
     if (xTaskCreate(SyncTask, "codex_sync", 4096, nullptr, 2, nullptr) != pdPASS) {
         ESP_LOGE("CodexSync", "Unable to start sync task");
     }

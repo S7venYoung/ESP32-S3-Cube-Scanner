@@ -1,14 +1,18 @@
-# Zhengchen 1.54 Wi-Fi：小智 AI + WALLE-CODEX 扫描页
+# Zhengchen 1.54 Wi-Fi：小智 AI + Codex 额度仪表盘
 
 本仓库当前源码基于附件 `1、代码.zip` 中的 **1.6.2 源程序**，目标板型为
 `zhengchen-1.54tft-wifi`（ESP32-S3 / 240×240）。原 Cube 2.0 项目只保留在 Git 历史中。
 
-小智语音对话在后台运行，默认显示 WALLE-CODEX BLE 扫描页；AI 状态以小圆点表示。
+小智语音对话在后台运行，默认显示 240×240 黑黄 Codex 额度仪表盘；AI 状态以小圆点表示。
 原音量键、BOOT 对话/配网、电量监测和高温告警保留。
+
+配套 macOS 程序：https://github.com/S7venYoung/prospector-codex-macos 。支持 USB UART0
+115200 (TX43/RX44) 与 Wi-Fi HTTP 8765 同步。GPIO20 是背光，不启用原生 USB。
+未知/过期额度显示 `--`，键盘层/WPM/L/R 电量尚未接入。详见 [双通道同步](docs/codex-sync.md)。
 
 提交到 `main` 后，Actions 自动构建 `Zhengchen-154-WiFi-Codex-firmware`。
 首次安装使用包中的 `merged-binary.bin`，地址 **0x0**。此前 Cube 2.0 的固件不适用。
-详见 [功能、按键、编译和刷机说明](docs/codex-scanner.md)。
+详见 [功能、按键、编译和刷机说明](docs/codex-scanner.md)。实机运行尚待验证。
 
 以下为附件所附上游小智项目说明。
 
@@ -161,8 +165,3 @@
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
  </picture>
 </a>
-# Codex 额度仪表盘 / USB + Wi-Fi
-
-默认 240×240 黑黄仪表盘显示 5 小时剩余、每周剩余及今日 Token。小智在后台工作，AI 状态为小圆点。配套 macOS 程序：https://github.com/S7venYoung/prospector-codex-macos 。
-
-USB 使用 UART0 (115200, TX43/RX44)，须由 USB 转串口连接；GPIO20 是背光，不能开启原生 USB。Wi-Fi 使用局域网 HTTP 8765 + USB 配对码。详见 [双通道同步](docs/codex-sync.md)。键盘状态还未接入，显示 `--`。编译成功不代表实机验证完成。
