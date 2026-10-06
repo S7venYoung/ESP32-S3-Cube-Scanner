@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Codex transport parser
         run: g++ -std=c++17 -Wall -Wextra -Werror tests/codex_protocol_test.cc -o /tmp/codex-protocol-test && /tmp/codex-protocol-test
+      - name: Validate direct-drawing coverage masks
+        run: g++ -std=c++17 -Wall -Wextra -Werror tests/codex2_drawing_test.cc -o /tmp/codex-drawing-test && /tmp/codex-drawing-test
       - name: Build Zhengchen Wi-Fi firmware and complete image
         uses: espressif/esp-idf-ci-action@v1
         with:

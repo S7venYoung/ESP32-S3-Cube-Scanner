@@ -31,7 +31,7 @@ uint32_t Mix(uint32_t foreground, unsigned alpha) {
 int Width(const DrawMask& mask, const char* text) {
     unsigned advance = 0;
     for (const unsigned char* p = reinterpret_cast<const unsigned char*>(text); *p; ++p) {
-        if (*p >= 32 && *p <= 127) advance += mask.glyphs[*p - 31].advance;
+        if (*p >= 32 && *p <= 126) advance += mask.glyphs[*p - 31].advance;
     }
     return (advance + 8) / 16;
 }
@@ -48,7 +48,7 @@ void Render(lv_obj_t* object, Drawing& drawing) {
     uint16_t palette[16];
     for (unsigned i = 0; i < 16; ++i) palette[i] = Rgb565(Mix(drawing.color, i * 17));
     for (unsigned char c : drawing.text) {
-        if (c < 32 || c > 127) continue;
+        if (c < 32 || c > 126) continue;
         const auto& glyph = mask.glyphs[c - 31];
         const int gx = static_cast<int>((advance / 16.0f + glyph.x) * scale) + origin;
         const int gy = static_cast<int>((mask.height - mask.baseline - glyph.height - glyph.y) * scale);
