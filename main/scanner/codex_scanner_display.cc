@@ -83,7 +83,8 @@ void CodexScannerDisplay::SetupUI() {
     quota_text_ = Impact(left, "--%", 1, 26, 106, kYellow, 48, true);
     Panel(left, 6, 82, 96, 1, kMuted, 0);
     Impact(left, "7 DAY LEFT", 6, 87, 61, kPaper);
-    week_text_ = Impact(left, "--%", 66, 84, 40, kYellow, 20);
+    // Keep a five-pixel gap after the label canvas (x=6, width=61).
+    week_text_ = Impact(left, "--%", 72, 84, 34, kYellow, 20);
     for (int i = 0; i < 6; ++i) {
         week_segments_[i] = Panel(left, 6 + i * 16, 111, 14, 6, kMuted, 1);
     }
