@@ -60,7 +60,13 @@ private:
         rtc_gpio_set_direction(GPIO_NUM_2, RTC_GPIO_MODE_OUTPUT_ONLY);
         rtc_gpio_set_level(GPIO_NUM_2, 1);
 
+#if CONFIG_ZMK_SCANNER_MODE
+        // A desktop monitor stays at the configured brightness, even on battery.
+        // Disable timeouts rather than just the timer: charging can re-enable it.
+        power_save_timer_ = new PowerSaveTimer(-1, -1, -1);
+#else
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+#endif
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
             GetBacklight()->SetBrightness(1);
