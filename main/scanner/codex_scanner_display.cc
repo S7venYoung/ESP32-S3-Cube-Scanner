@@ -74,7 +74,6 @@ void CodexScannerDisplay::SetupUI() {
     battery_text_ = Impact(dashboard_, "--%", 191, 0, 36, kPaper);
     scan_dot_ = Panel(dashboard_, 226, 24, 7, 7, kMuted, 4);
     scan_status_ = Impact(dashboard_, "OFFLINE", 169, 18, 53, kPaper);
-    assistant_dot_ = Panel(dashboard_, 230, 3, 5, 5, kMuted, 3);
     Panel(dashboard_, 10, 36, 220, 2, kYellow, 0);
 
     auto* left = Outline(dashboard_, 6, 44, 110, 126, kYellow, 12);
@@ -130,7 +129,7 @@ void CodexScannerDisplay::SetupUI() {
     lv_obj_add_flag(notice_panel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(low_battery_popup_);
     lv_obj_move_foreground(high_temp_popup_);
-    UpdateAssistantDot();
+    UpdateAssistantOverlay();
     UpdateMetrics();
 }
 
@@ -160,8 +159,8 @@ void CodexScannerDisplay::UpdateMetrics() {
     CodexDrawSetText(tokens_text_, text);
 }
 
-void CodexScannerDisplay::UpdateAssistantDot() {
-    if (assistant_dot_ == nullptr) return;
+void CodexScannerDisplay::UpdateAssistantOverlay() {
+    if (assistant_overlay_ == nullptr) return;
     uint32_t color = kMuted;
     const auto state = Application::GetInstance().GetDeviceState();
     switch (state) {
@@ -173,8 +172,7 @@ void CodexScannerDisplay::UpdateAssistantDot() {
         case kDeviceStateFatalError: color = kRed; break;
         default: break;
     }
-    lv_obj_set_style_bg_color(assistant_dot_, lv_color_hex(color), 0);
-    if (assistant_overlay_ == nullptr || shown_assistant_state_ == static_cast<int>(state)) return;
+    if (shown_assistant_state_ == static_cast<int>(state)) return;
     shown_assistant_state_ = static_cast<int>(state);
     const bool active = state == kDeviceStateListening || state == kDeviceStateSpeaking ||
                         state == kDeviceStateConnecting;
@@ -207,7 +205,7 @@ void CodexScannerDisplay::SetStatus(const char* status) {
         return;
     }
     DisplayLockGuard lock(this);
-    UpdateAssistantDot();
+    UpdateAssistantOverlay();
 }
 
 void CodexScannerDisplay::SetChatMessage(const char* role, const char* content) {
@@ -241,7 +239,7 @@ void CodexScannerDisplay::Update() {
     const bool has_battery = board.GetBatteryLevel(level, charging, discharging);
     DisplayLockGuard lock(this);
     if (dashboard_ == nullptr) return;
-    UpdateAssistantDot();
+    UpdateAssistantOverlay();
     char text[24];
     UpdateMetrics();
     const int battery_level = has_battery ? std::clamp(level, 0, 100) : -1;
