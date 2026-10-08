@@ -71,12 +71,14 @@ v2.5 的分区及语音资源布局已经改变：
 
 使用 [prospector-codex-macos](https://github.com/S7venYoung/prospector-codex-macos) 采集并同步数据。额度不是固件自行查询或估算的，必须由配套程序上报。
 
-- USB：选择实际的板载 USB 转串口端口，波特率 115200。
-- Wi-Fi：Mac 和 Cube 需要网络可达，通过配套程序完成设备配对；同步服务使用 TCP 8765。
+- USB：在配套程序选择“Cube Codex 双通道”，启用 USB 并同步；选择实际的板载 USB 转串口端口，波特率 115200。
+- Wi-Fi：先通过 USB 同步取得设备 IP 和配对令牌，再启用 Wi-Fi；Mac 和 Cube 需处于可信局域网。同步为未加密 HTTP，端口 8765，不要暴露到公网。
 - 协议：`CODEX2 <5h-left|-1> <week-left|-1> <tokens|-1> <age-seconds> <ttl-seconds>`。
 - 未取得的数据使用 `-1`，页面显示 `--`；额度来源过期超过 15 分钟时，不继续显示旧额度。
 - USB 优先租约为 75 秒，由有效数据刷新，而不是由 PING 刷新。
 - Wi-Fi 更新需要配对令牌，不要公开该令牌。
+
+刷机前退出配套程序或停用其 USB 同步，释放串口，避免通信冲突。
 
 如果 USB 或 Wi-Fi 已连接但没有额度，先检查配套程序是否取得有效数据、是否为兼容 CODEX2 的版本，以及是否成功配对。
 
