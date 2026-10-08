@@ -66,8 +66,14 @@ void CodexScannerDisplay::SetupUI() {
     dashboard_ = Panel(lv_screen_active(), 0, 0, width_, height_, kInk, 0);
     Impact(dashboard_, "CODEX", 10, 9, 56, kYellow, 20);
     Impact(dashboard_, "// SOFLE", 68, 9, 87, kPaper, 20);
-    scan_dot_ = Panel(dashboard_, 226, 16, 7, 7, kMuted, 4);
-    scan_status_ = Impact(dashboard_, "OFFLINE", 169, 12, 53, kPaper);
+    // Two compact rows on the right: Cube battery above transport status.
+    auto* battery = Outline(dashboard_, 169, 5, 18, 10, kMuted, 2);
+    Panel(dashboard_, 187, 8, 2, 4, kMuted, 0);
+    cube_battery_fill_ = Panel(battery, 2, 2, 14, 6, kMuted, 0);
+    lv_obj_add_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
+    battery_text_ = Impact(dashboard_, "--%", 191, 0, 36, kPaper);
+    scan_dot_ = Panel(dashboard_, 226, 24, 7, 7, kMuted, 4);
+    scan_status_ = Impact(dashboard_, "OFFLINE", 169, 18, 53, kPaper);
     assistant_dot_ = Panel(dashboard_, 230, 3, 5, 5, kMuted, 3);
     Panel(dashboard_, 10, 36, 220, 2, kYellow, 0);
 
@@ -194,9 +200,22 @@ void CodexScannerDisplay::Update() {
     UpdateAssistantDot();
     char text[24];
     UpdateMetrics();
-    if (has_battery && battery_text_ != nullptr) {
-        std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+ " : "BAT ", level);
-        lv_label_set_text(battery_text_, text);
+    const int battery_level = has_battery ? std::clamp(level, 0, 100) : -1;
+    if (battery_text_ != nullptr &&
+        (battery_level != shown_battery_level_ || charging != shown_charging_)) {
+        shown_battery_level_ = battery_level;
+        shown_charging_ = charging;
+        if (has_battery) std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+" : "", battery_level);
+        else std::snprintf(text, sizeof(text), "--%%");
+        CodexDrawSetText(battery_text_, text);
+        if (battery_level <= 0) {
+            lv_obj_add_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_set_width(cube_battery_fill_, std::max(1, (battery_level * 14 + 99) / 100));
+            lv_obj_set_style_bg_color(cube_battery_fill_,
+                lv_color_hex(charging ? kGreen : battery_level <= 20 ? kRed : kYellow), 0);
+            lv_obj_remove_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     if (esp_timer_get_time() >= notice_until_us_) {
         lv_obj_add_flag(notice_panel_, LV_OBJ_FLAG_HIDDEN);

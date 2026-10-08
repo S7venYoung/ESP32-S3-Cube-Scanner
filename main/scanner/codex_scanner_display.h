@@ -34,6 +34,9 @@ private:
     lv_obj_t* scan_status_ = nullptr;
     lv_obj_t* filter_label_ = nullptr;
     lv_obj_t* battery_text_ = nullptr;
+    lv_obj_t* cube_battery_fill_ = nullptr;
+    int shown_battery_level_ = -2;
+    bool shown_charging_ = false;
     lv_obj_t* device_names_[2] = {};
     lv_obj_t* addresses_[2] = {};
     lv_obj_t* rssi_labels_[2] = {};
