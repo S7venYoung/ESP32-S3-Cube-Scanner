@@ -3,6 +3,8 @@ set -euo pipefail
 python -m unittest discover -s scripts/tests -q
 g++ -std=c++17 tests/dashboard_command_test.cc -o /tmp/dashboard-command-test
 /tmp/dashboard-command-test
+g++ -std=c++17 tests/prospector_modifiers_test.cc -o /tmp/prospector-modifiers-test
+/tmp/prospector-modifiers-test
 g++ -std=c++17 tests/codex_protocol_test.cc -o /tmp/codex-protocol-test
 /tmp/codex-protocol-test
 g++ -std=c++17 tests/codex2_drawing_test.cc -o /tmp/codex-drawing-test

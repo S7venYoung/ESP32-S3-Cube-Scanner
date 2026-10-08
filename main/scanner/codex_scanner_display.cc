@@ -176,13 +176,13 @@ void CodexScannerDisplay::SetupMacintosh() {
     };
     // Pixel bevels and double rules reproduce a monochrome compact Macintosh.
     Panel(mac_dashboard_,8,28,224,1,kMacInk,0);
-    MacintoshText(mac_dashboard_,"ZMK DONGLE",30,10,112,1);
+    MacintoshText(mac_dashboard_,"ZMK DONGLE",30,10,102,1);
     auto* logo=rect(mac_dashboard_,10,5,15,20);
     rect(logo,2,2,11,12);
     Panel(logo,5,6,1,2,kMacInk,0);Panel(logo,9,6,1,2,kMacInk,0);
     Panel(logo,6,11,4,1,kMacInk,0);Panel(logo,4,16,7,1,kMacInk,0);
-    mac_battery_=MacintoshText(mac_dashboard_,"--%",146,10,32,1);
-    mac_transport_=MacintoshText(mac_dashboard_,"OFFLINE",183,10,49,1);
+    mac_battery_=MacintoshText(mac_dashboard_,"--%",136,10,40,1);
+    mac_transport_=MacintoshText(mac_dashboard_,"OFF",183,10,49,1);
     for(int i=0;i<2;++i) {
         auto* kb=card(i==0?8:182,43,48,73);
         MacintoshText(kb,i==0?"L KB":"R KB",3,8,42,1,true);
@@ -196,10 +196,11 @@ void CodexScannerDisplay::SetupMacintosh() {
     MacintoshText(monitor,"LAYER",8,22,92,1,true);
     MacintoshText(monitor,"--",8,38,92,4,true);
     for(int i=0;i<4;++i) {
-        auto* key=rect(mac_dashboard_,65+i*28,120,24,23);
-        const char* names[]={"CTL","ALT","GUI","SFT"};
-        MacintoshText(key,names[i],2,4,20,1,true);
-        rect(key,10,15,4,4); // Unfilled: modifier telemetry is unavailable.
+        auto* key=rect(mac_dashboard_,65+i*28,120,24,27);
+        // Draw Mac symbols: Control ⌃ / Option ⌥ / Command ⌘ / Shift ⇧.
+        const char* symbols[]={"^","~","@","#"};
+        mac_modifier_keys_[i]=key;
+        mac_modifier_symbols_[i]=MacintoshText(key,symbols[i],2,6,20,2,true);
     }
     auto* radio=card(8,152,74,48);
     MacintoshText(radio,"CH --",5,7,64,1);
@@ -219,7 +220,7 @@ void CodexScannerDisplay::SetupMacintosh() {
     Panel(mac_dashboard_,8,207,224,1,kMacInk,0);
     mac_quota_=MacintoshText(mac_dashboard_,"5H --% 7D --%",8,213,222,1);
     mac_tokens_=MacintoshText(mac_dashboard_,"TODAY --",8,228,172,1);
-    mac_clock_=MacintoshText(mac_dashboard_,"--:--",193,228,37,1);
+    mac_clock_=MacintoshText(mac_dashboard_,"--:--",191,228,40,1);
 }
 
 void CodexScannerDisplay::SetDashboardTheme(const std::string& theme) {
@@ -242,10 +243,20 @@ void CodexScannerDisplay::NextDashboardTheme() {
     SetDashboardTheme(mac_theme_ ? "codex" : "macintosh");
 }
 
+void CodexScannerDisplay::SetMacModifierState(uint8_t modifiers) {
+    DisplayLockGuard lock(this);
+    for (int i=0;i<4;++i) {
+        if (!mac_modifier_keys_[i]) continue;
+        const bool pressed=(modifiers & (1u<<i))!=0;
+        lv_obj_set_style_bg_color(mac_modifier_keys_[i],lv_color_hex(pressed ? kMacInk : kMacPaper),0);
+        MacintoshSetInverted(mac_modifier_symbols_[i],pressed);
+    }
+}
+
 void CodexScannerDisplay::UpdateMacintosh() {
     if (!mac_theme_ || mac_dashboard_==nullptr) return;
     const auto sample=GetCodexSnapshot();
-    MacintoshSetText(mac_transport_,sample.transport);
+    MacintoshSetText(mac_transport_,std::strcmp(sample.transport,"OFFLINE")==0 ? "OFF" : sample.transport);
     char primary[12]="--%",weekly[12]="--%",line[64];
     if(sample.online && sample.metrics.left>=0) std::snprintf(primary,sizeof(primary),"%d%%",sample.metrics.left);
     if(sample.online && sample.metrics.week_left>=0) std::snprintf(weekly,sizeof(weekly),"%d%%",sample.metrics.week_left);

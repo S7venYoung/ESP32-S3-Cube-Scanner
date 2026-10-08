@@ -5,7 +5,8 @@
 #include <new>
 
 namespace {
-// Hand-drawn 5x7 column masks: no font files, LVGL labels or raster assets.
+// Hand-drawn masks, expanded horizontally to two-pixel stems with
+// two blank columns between characters. No system-font fallback.
 constexpr uint8_t digits[][5] = {
  {0x3e,0x51,0x49,0x45,0x3e},{0,0x42,0x7f,0x40,0},{0x42,0x61,0x51,0x49,0x46},
  {0x21,0x41,0x45,0x4b,0x31},{0x18,0x14,0x12,0x7f,0x10},{0x27,0x45,0x45,0x45,0x39},
@@ -20,10 +21,10 @@ constexpr uint8_t letters[][5] = {
  {0x46,0x49,0x49,0x49,0x31},{1,1,0x7f,1,1},{0x3f,0x40,0x40,0x40,0x3f},
  {0x1f,0x20,0x40,0x20,0x1f},{0x3f,0x40,0x38,0x40,0x3f},{0x63,0x14,8,0x14,0x63},
  {7,8,0x70,8,7},{0x61,0x51,0x49,0x45,0x43}};
-struct PixelText { std::string text; uint16_t* pixels; int width, stride, scale; bool centered; };
+struct PixelText { std::string text; uint16_t* pixels; int width, stride, scale; bool centered; bool inverted = false; };
 uint16_t Color(uint32_t rgb) { return ((rgb >> 19) & 31) << 11 | ((rgb >> 10) & 63) << 5 | ((rgb >> 3) & 31); }
 void Glyph(unsigned char c, uint8_t* out) {
-    std::fill(out, out+5, 0);
+    std::fill(out, out+7, 0);
     if (c >= 'a' && c <= 'z') c -= 32;
     if (c >= '0' && c <= '9') std::copy(digits[c-'0'], digits[c-'0']+5, out);
     else if (c >= 'A' && c <= 'Z') std::copy(letters[c-'A'], letters[c-'A']+5, out);
@@ -33,6 +34,11 @@ void Glyph(unsigned char c, uint8_t* out) {
     else if (c == '.') { out[2] = 0x60; }
     else if (c == '+') { out[1]=8;out[2]=0x1c;out[3]=8; }
     else if (c == '/') { const uint8_t v[] = {0x40,0x20,0x10,8,4}; std::copy(v,v+5,out); }
+    // Internal ASCII keys for Mac Control, Option, Command and Shift symbols.
+    else if (c == '^') { const uint8_t v[] = {0x10,8,4,2,4,8,0x10}; std::copy(v,v+7,out); }
+    else if (c == '~') { const uint8_t v[] = {2,2,4,8,0x10,0x22,0x22}; std::copy(v,v+7,out); }
+    else if (c == '@') { const uint8_t v[] = {0x77,0x55,0x7f,0x14,0x7f,0x55,0x77}; std::copy(v,v+7,out); }
+    else if (c == '#') { const uint8_t v[] = {8,0x0c,0x7a,0x41,0x7a,0x0c,8}; std::copy(v,v+7,out); }
 }
 } // namespace
 
@@ -62,18 +68,29 @@ void MacintoshSetText(lv_obj_t* obj,const char* text) {
     auto* p=static_cast<PixelText*>(lv_obj_get_user_data(obj));
     if (!p || p->text==text) return;
     p->text=text;
-    std::fill(p->pixels,p->pixels+p->stride*7*p->scale,Color(kMacPaper));
-    const int cells=p->text.empty()?0:static_cast<int>(p->text.size()*6-1);
+    std::fill(p->pixels,p->pixels+p->stride*7*p->scale,Color(p->inverted ? kMacInk : kMacPaper));
+    const bool symbol=p->text.size()==1 && std::strchr("^~@#",p->text[0]);
+    const int cells=p->text.empty()?0:static_cast<int>(p->text.size()*8-(symbol?1:2));
     const int scale=std::max(1,std::min(p->scale,p->width/std::max(1,cells)));
     int origin=p->centered ? std::max(0,(p->width-cells*scale)/2):0;
     for (unsigned char c:p->text) {
-        uint8_t glyph[5];Glyph(c,glyph);
-        for (int x=0;x<5;++x) for(int y=0;y<7;++y) if (glyph[x]&(1<<y))
-            for(int dx=0;dx<scale;++dx) for(int dy=0;dy<scale;++dy) {
+        uint8_t glyph[7];Glyph(c,glyph);
+        for (int x=0;x<(symbol?7:5);++x) for(int y=0;y<7;++y) if (glyph[x]&(1<<y))
+            for(int dx=0;dx<(symbol?1:2)*scale;++dx) for(int dy=0;dy<scale;++dy) {
                 const int px=origin+x*scale+dx, py=y*scale+dy;
-                if(px<p->width) p->pixels[py*p->stride+px]=Color(kMacInk);
+                if(px<p->width) p->pixels[py*p->stride+px]=Color(p->inverted ? kMacPaper : kMacInk);
             }
-        origin+=6*scale;
+        origin+=8*scale;
     }
     lv_obj_invalidate(obj);
+}
+
+void MacintoshSetInverted(lv_obj_t* obj, bool inverted) {
+    if (!obj) return;
+    auto* p=static_cast<PixelText*>(lv_obj_get_user_data(obj));
+    if (!p || p->inverted==inverted) return;
+    p->inverted=inverted;
+    const std::string text=p->text;
+    p->text.clear();
+    MacintoshSetText(obj,text.c_str());
 }

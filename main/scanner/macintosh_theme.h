@@ -5,5 +5,6 @@
 lv_obj_t* MacintoshText(lv_obj_t* parent, const char* text, int x, int y, int width,
                         int scale = 1, bool centered = false);
 void MacintoshSetText(lv_obj_t* object, const char* text);
+void MacintoshSetInverted(lv_obj_t* object, bool inverted);
 constexpr uint32_t kMacPaper = 0xD8D1BE;
 constexpr uint32_t kMacInk = 0x282922;
