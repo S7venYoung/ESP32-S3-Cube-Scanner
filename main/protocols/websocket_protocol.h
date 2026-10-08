@@ -16,18 +16,19 @@ public:
     ~WebsocketProtocol();
 
     bool Start() override;
-    void SendAudio(const AudioStreamPacket& packet) override;
+    bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) override;
     bool OpenAudioChannel() override;
-    void CloseAudioChannel() override;
+    void CloseAudioChannel(bool send_goodbye = true) override;
     bool IsAudioChannelOpened() const override;
 
 private:
     EventGroupHandle_t event_group_handle_;
-    WebSocket* websocket_ = nullptr;
+    std::unique_ptr<WebSocket> websocket_;
     int version_ = 1;
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;
+    std::string GetHelloMessage();
 };
 
 #endif

@@ -1,15 +1,13 @@
 #include "codex_scanner_display.h"
 
-#include "application.h"
-#include "board.h"
-#include "codex_metrics.h"
-#include "codex_draw.h"
 #include <esp_timer.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
-
-LV_FONT_DECLARE(font_puhui_14_1);
+#include "application.h"
+#include "board.h"
+#include "codex_draw.h"
+#include "codex_metrics.h"
 
 namespace {
 constexpr uint32_t kInk = 0x101411;
@@ -37,14 +35,13 @@ lv_obj_t* Text(lv_obj_t* parent, const char* text, int x, int y, int w, uint32_t
     auto* obj = lv_label_create(parent);
     lv_label_set_text(obj, text);
     lv_obj_set_pos(obj, x, y);
-    lv_obj_set_size(obj, w, font_puhui_14_1.line_height);
-    lv_obj_set_style_text_font(obj, &font_puhui_14_1, 0);
+    lv_obj_set_size(obj, w, 18);
     lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
     return obj;
 }
 
-lv_obj_t* Impact(lv_obj_t* parent, const char* text, int x, int y, int w,
-                 uint32_t color, int size = 16, bool centered = false) {
+lv_obj_t* Impact(lv_obj_t* parent, const char* text, int x, int y, int w, uint32_t color,
+                 int size = 16, bool centered = false) {
     return CodexDrawText(parent, text, x, y, w, color, size, centered);
 }
 
@@ -57,12 +54,17 @@ lv_obj_t* Outline(lv_obj_t* parent, int x, int y, int w, int h, uint32_t border,
 }  // namespace
 
 void CodexScannerDisplay::SetupUI() {
-    // The SPI display constructor has already created the native UI. Retain
-    // its status objects and warning popups for the original battery service.
-    ZHENGCHEN_LcdDisplay::SetupUI();
+    // v2.5 creates the native UI explicitly during Application initialization.
+    // Retain its status objects and hardware warning popups.
+    SpiLcdDisplay::SetupUI();
     DisplayLockGuard lock(this);
-    if (dashboard_ != nullptr) return;
+    if (dashboard_ != nullptr)
+        return;
     lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
+    if (emoji_label_)
+        lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    if (emoji_image_)
+        lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     dashboard_ = Panel(lv_screen_active(), 0, 0, width_, height_, kInk, 0);
     Impact(dashboard_, "CODEX", 10, 9, 56, kYellow, 20);
     Impact(dashboard_, "// SOFLE", 68, 9, 87, kPaper, 20);
@@ -98,7 +100,8 @@ void CodexScannerDisplay::SetupUI() {
     Impact(state, "WPM", 132, 4, 35, kMuted);
     Impact(state, "--", 177, 2, 40, kYellow, 20);
     for (int i = 0; i < 2; ++i) {
-        auto* battery = Outline(dashboard_, i == 0 ? 6 : 122, 208, i == 0 ? 110 : 112, 26, kMuted, 7);
+        auto* battery =
+            Outline(dashboard_, i == 0 ? 6 : 122, 208, i == 0 ? 110 : 112, 26, kMuted, 7);
         Impact(battery, i == 0 ? "L" : "R", 7, 4, 13, kMuted);
         Impact(battery, "--%", 24, 4, 35, kPaper);
         Outline(battery, 66, 8, 33, 10, kMuted, 2);
@@ -128,19 +131,24 @@ void CodexScannerDisplay::SetupUI() {
     lv_obj_set_height(notice_text_, 43);
     lv_obj_add_flag(notice_panel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(low_battery_popup_);
-    lv_obj_move_foreground(high_temp_popup_);
+    high_temp_popup_ = Panel(lv_screen_active(), 8, 184, 224, 48, kRed, 10);
+    Impact(high_temp_popup_, "CPU HOT", 12, 12, 200, kPaper, 20, true);
+    lv_obj_add_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
     UpdateAssistantOverlay();
     UpdateMetrics();
 }
 
 void CodexScannerDisplay::UpdateMetrics() {
-    if (quota_text_ == nullptr) return;
+    if (quota_text_ == nullptr)
+        return;
     const auto sample = GetCodexSnapshot();
     CodexDrawSetText(scan_status_, sample.transport);
     lv_obj_set_style_bg_color(scan_dot_, lv_color_hex(sample.online ? kGreen : kMuted), 0);
     char text[32];
-    if (sample.online && sample.metrics.left >= 0) std::snprintf(text, sizeof(text), "%d%%", sample.metrics.left);
-    else std::snprintf(text, sizeof(text), "--%%");
+    if (sample.online && sample.metrics.left >= 0)
+        std::snprintf(text, sizeof(text), "%d%%", sample.metrics.left);
+    else
+        std::snprintf(text, sizeof(text), "--%%");
     CodexDrawSetText(quota_text_, text);
     if (sample.online && sample.metrics.week_left >= 0) {
         std::snprintf(text, sizeof(text), "%d%%", sample.metrics.week_left);
@@ -148,31 +156,50 @@ void CodexScannerDisplay::UpdateMetrics() {
         std::snprintf(text, sizeof(text), "--%%");
     }
     CodexDrawSetText(week_text_, text);
-    const int segments = sample.online && sample.metrics.week_left >= 0 ?
-        (sample.metrics.week_left * 6 + 99) / 100 : 0;
-    for (int i = 0; i < 6; ++i) lv_obj_set_style_bg_color(week_segments_[i],
-        lv_color_hex(i < segments ? kYellow : kMuted), 0);
-    if (!sample.online || sample.metrics.tokens < 0) std::snprintf(text, sizeof(text), "--");
-    else if (sample.metrics.tokens >= 1000000) std::snprintf(text, sizeof(text), "%.1fM", sample.metrics.tokens / 1000000.0);
-    else if (sample.metrics.tokens >= 1000) std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
-    else std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
+    const int segments = sample.online && sample.metrics.week_left >= 0
+                             ? (sample.metrics.week_left * 6 + 99) / 100
+                             : 0;
+    for (int i = 0; i < 6; ++i)
+        lv_obj_set_style_bg_color(week_segments_[i], lv_color_hex(i < segments ? kYellow : kMuted),
+                                  0);
+    if (!sample.online || sample.metrics.tokens < 0)
+        std::snprintf(text, sizeof(text), "--");
+    else if (sample.metrics.tokens >= 1000000)
+        std::snprintf(text, sizeof(text), "%.1fM", sample.metrics.tokens / 1000000.0);
+    else if (sample.metrics.tokens >= 1000)
+        std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
+    else
+        std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
     CodexDrawSetText(tokens_text_, text);
 }
 
 void CodexScannerDisplay::UpdateAssistantOverlay() {
-    if (assistant_overlay_ == nullptr) return;
+    if (assistant_overlay_ == nullptr)
+        return;
     uint32_t color = kMuted;
     const auto state = Application::GetInstance().GetDeviceState();
     switch (state) {
-        case kDeviceStateListening: color = kYellow; break;
-        case kDeviceStateSpeaking: color = kGreen; break;
-        case kDeviceStateConnecting: color = 0x49A5F0; break;
+        case kDeviceStateListening:
+            color = kYellow;
+            break;
+        case kDeviceStateSpeaking:
+            color = kGreen;
+            break;
+        case kDeviceStateConnecting:
+            color = 0x49A5F0;
+            break;
         case kDeviceStateWifiConfiguring:
-        case kDeviceStateActivating: color = 0xFF902B; break;
-        case kDeviceStateFatalError: color = kRed; break;
-        default: break;
+        case kDeviceStateActivating:
+            color = 0xFF902B;
+            break;
+        case kDeviceStateFatalError:
+            color = kRed;
+            break;
+        default:
+            break;
     }
-    if (shown_assistant_state_ == static_cast<int>(state)) return;
+    if (shown_assistant_state_ == static_cast<int>(state))
+        return;
     shown_assistant_state_ = static_cast<int>(state);
     const bool active = state == kDeviceStateListening || state == kDeviceStateSpeaking ||
                         state == kDeviceStateConnecting;
@@ -181,8 +208,9 @@ void CodexScannerDisplay::UpdateAssistantOverlay() {
         lv_obj_add_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    CodexDrawSetText(assistant_overlay_text_, state == kDeviceStateListening ? "LISTENING" :
-        state == kDeviceStateSpeaking ? "SPEAKING" : "CONNECTING");
+    CodexDrawSetText(assistant_overlay_text_, state == kDeviceStateListening  ? "LISTENING"
+                                              : state == kDeviceStateSpeaking ? "SPEAKING"
+                                                                              : "CONNECTING");
     lv_obj_set_style_border_color(assistant_overlay_, lv_color_hex(color), 0);
     lv_obj_remove_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(assistant_orb_, nullptr);
@@ -211,9 +239,12 @@ void CodexScannerDisplay::SetStatus(const char* status) {
 void CodexScannerDisplay::SetChatMessage(const char* role, const char* content) {
     // Keep spoken conversation off the dashboard, while retaining important
     // first-use Wi-Fi and activation instructions from the native app.
-    if (role == nullptr || content == nullptr || content[0] == '\0' || std::strcmp(role, "system") != 0) return;
+    if (role == nullptr || content == nullptr || content[0] == '\0' ||
+        std::strcmp(role, "system") != 0)
+        return;
     const auto state = Application::GetInstance().GetDeviceState();
-    if (state != kDeviceStateIdle && state != kDeviceStateListening && state != kDeviceStateSpeaking) {
+    if (state != kDeviceStateIdle && state != kDeviceStateListening &&
+        state != kDeviceStateSpeaking) {
         ShowNotification(content, 10000);
     }
 }
@@ -223,22 +254,30 @@ void CodexScannerDisplay::ShowNotification(const std::string& text, int duration
 }
 
 void CodexScannerDisplay::ShowNotification(const char* text, int duration_ms) {
-    if (text == nullptr || notice_panel_ == nullptr) return;
+    if (text == nullptr || notice_panel_ == nullptr)
+        return;
     DisplayLockGuard lock(this);
     lv_label_set_text(notice_text_, text);
     notice_until_us_ = esp_timer_get_time() + static_cast<int64_t>(std::max(0, duration_ms)) * 1000;
     lv_obj_remove_flag(notice_panel_, LV_OBJ_FLAG_HIDDEN);
 }
 
-void CodexScannerDisplay::Update() {
+void CodexScannerDisplay::UpdateStatusBar(bool update_all) {
     // Native battery warnings, charging detection, and audio remain active.
-    Display::Update();
+    SpiLcdDisplay::UpdateStatusBar(update_all);
     int level = 0;
     bool charging = false, discharging = false;
     auto& board = Board::GetInstance();
     const bool has_battery = board.GetBatteryLevel(level, charging, discharging);
+    float temperature = 0;
+    const bool has_temperature = board.GetTemperature(temperature);
     DisplayLockGuard lock(this);
-    if (dashboard_ == nullptr) return;
+    if (dashboard_ == nullptr)
+        return;
+    if (has_temperature && temperature >= 75)
+        lv_obj_remove_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
     UpdateAssistantOverlay();
     char text[24];
     UpdateMetrics();
@@ -247,15 +286,20 @@ void CodexScannerDisplay::Update() {
         (battery_level != shown_battery_level_ || charging != shown_charging_)) {
         shown_battery_level_ = battery_level;
         shown_charging_ = charging;
-        if (has_battery) std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+" : "", battery_level);
-        else std::snprintf(text, sizeof(text), "--%%");
+        if (has_battery)
+            std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+" : "", battery_level);
+        else
+            std::snprintf(text, sizeof(text), "--%%");
         CodexDrawSetText(battery_text_, text);
         if (battery_level <= 0) {
             lv_obj_add_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_set_width(cube_battery_fill_, std::max(1, (battery_level * 14 + 99) / 100));
             lv_obj_set_style_bg_color(cube_battery_fill_,
-                lv_color_hex(charging ? kGreen : battery_level <= 20 ? kRed : kYellow), 0);
+                                      lv_color_hex(charging              ? kGreen
+                                                   : battery_level <= 20 ? kRed
+                                                                         : kYellow),
+                                      0);
             lv_obj_remove_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
         }
     }
@@ -265,8 +309,10 @@ void CodexScannerDisplay::Update() {
 }
 
 void CodexScannerDisplay::UpdateScanner(const std::vector<ScannerDevice>& devices, bool scanning,
-                                      const std::string& filter) {
+                                        const std::string& filter) {
     // BLE discovery alone cannot supply layers/WPM/batteries. Keep those
     // fields unavailable until the real ZMK telemetry protocol is connected.
-    (void)devices; (void)scanning; (void)filter;
+    (void)devices;
+    (void)scanning;
+    (void)filter;
 }

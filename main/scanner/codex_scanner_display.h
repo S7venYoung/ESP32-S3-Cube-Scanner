@@ -1,17 +1,18 @@
 #pragma once
 
-#include "boards/zhengchen-1.54tft-wifi/zhengchen_lcd_display.h"
+#include "display/lcd_display.h"
 #include "scanner_device.h"
 
 #include <vector>
 
-class CodexScannerDisplay : public ZHENGCHEN_LcdDisplay {
+class CodexScannerDisplay : public SpiLcdDisplay {
 public:
-    using ZHENGCHEN_LcdDisplay::ZHENGCHEN_LcdDisplay;
-    void SetupUI();
+    using SpiLcdDisplay::SpiLcdDisplay;
+    void SetupUI() override;
+    void UpdateStatusBar(bool update_all = false) override;
+    void ClearChatMessages() override {}
     void SetStatus(const char* status) override;
     void SetEmotion(const char* emotion) override {}
-    void SetIcon(const char* icon) override {}
     void SetChatMessage(const char* role, const char* content) override;
     void ShowNotification(const char* text, int duration_ms = 3000) override;
     void ShowNotification(const std::string& text, int duration_ms = 3000) override;
@@ -19,7 +20,7 @@ public:
                        const std::string& filter);
 
 protected:
-    void Update() override;
+    lv_obj_t* high_temp_popup_ = nullptr;
 
 private:
     void UpdateAssistantOverlay();  // Caller holds the LVGL lock.

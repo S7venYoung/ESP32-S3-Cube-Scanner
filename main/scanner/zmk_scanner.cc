@@ -1,10 +1,10 @@
 #include "zmk_scanner.h"
-#include "codex_scanner_display.h"
 #include "board.h"
+#include "codex_scanner_display.h"
 
 #include <esp_err.h>
-#include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <esp_log.h>
 #include <esp_timer.h>
 #include <host/ble_gap.h>
 #include <host/ble_hs.h>
@@ -30,9 +30,10 @@ void Refresh(bool scanning) {
 }
 
 void Prune(int64_t now) {
-    devices.erase(std::remove_if(devices.begin(), devices.end(), [now](const ScannerDevice& d) {
-        return now - d.last_seen_us > 10000000;
-    }), devices.end());
+    devices.erase(
+        std::remove_if(devices.begin(), devices.end(),
+                       [now](const ScannerDevice& d) { return now - d.last_seen_us > 10000000; }),
+        devices.end());
 }
 
 int OnGapEvent(ble_gap_event* event, void*) {
@@ -42,31 +43,38 @@ int OnGapEvent(ble_gap_event* event, void*) {
         BeginDiscovery();
         return 0;
     }
-    if (event->type != BLE_GAP_EVENT_DISC) return 0;
+    if (event->type != BLE_GAP_EVENT_DISC)
+        return 0;
     ble_hs_adv_fields fields = {};
     if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) != 0 ||
-        fields.name == nullptr || fields.name_len == 0) return 0;
+        fields.name == nullptr || fields.name_len == 0)
+        return 0;
     const std::string name(reinterpret_cast<const char*>(fields.name), fields.name_len);
-    if (!name_filter.empty() && name.find(name_filter) == std::string::npos) return 0;
+    if (!name_filter.empty() && name.find(name_filter) == std::string::npos)
+        return 0;
     const int64_t now = esp_timer_get_time();
     Prune(now);
     const auto* addr = event->disc.addr.val;
     char address[18];
-    std::snprintf(address, sizeof(address), "%02X:%02X:%02X:%02X:%02X:%02X",
-                  addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
-    auto existing = std::find_if(devices.begin(), devices.end(), [&address](const ScannerDevice& d) {
-        return d.address == address;
-    });
+    std::snprintf(address, sizeof(address), "%02X:%02X:%02X:%02X:%02X:%02X", addr[5], addr[4],
+                  addr[3], addr[2], addr[1], addr[0]);
+    auto existing =
+        std::find_if(devices.begin(), devices.end(),
+                     [&address](const ScannerDevice& d) { return d.address == address; });
     ScannerDevice latest{name, address, event->disc.rssi, now};
-    if (existing != devices.end()) *existing = latest;
-    else if (devices.size() < 2) devices.push_back(latest);
+    if (existing != devices.end())
+        *existing = latest;
+    else if (devices.size() < 2)
+        devices.push_back(latest);
     else {
-        auto weakest = std::min_element(devices.begin(), devices.end(), [](const ScannerDevice& a, const ScannerDevice& b) {
-            return a.rssi < b.rssi;
-        });
-        if (latest.rssi > weakest->rssi) *weakest = latest;
+        auto weakest = std::min_element(
+            devices.begin(), devices.end(),
+            [](const ScannerDevice& a, const ScannerDevice& b) { return a.rssi < b.rssi; });
+        if (latest.rssi > weakest->rssi)
+            *weakest = latest;
     }
-    if (now - last_refresh_us >= 250000) Refresh(true);
+    if (now - last_refresh_us >= 250000)
+        Refresh(true);
     return 0;
 }
 
@@ -101,8 +109,8 @@ void StartZmkScanner() {
     const auto caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     const size_t free = heap_caps_get_free_size(caps);
     const size_t largest = heap_caps_get_largest_free_block(caps);
-    ESP_LOGI(kTag, "Before BLE: internal free=%u largest=%u",
-             static_cast<unsigned>(free), static_cast<unsigned>(largest));
+    ESP_LOGI(kTag, "Before BLE: internal free=%u largest=%u", static_cast<unsigned>(free),
+             static_cast<unsigned>(largest));
     if (free < 64 * 1024 || largest < 16 * 1024) {
         ESP_LOGW(kTag, "Skipping optional BLE discovery to preserve native services");
         return;
