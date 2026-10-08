@@ -134,8 +134,12 @@ private:
 
         volume_up_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
+#if CONFIG_ZMK_SCANNER_MODE
+            Application::GetInstance().Schedule([this]() { display_->NextDashboardTheme(); });
+#else
             GetAudioCodec()->SetOutputVolume(100);
             GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+#endif
         });
 
         volume_down_button_.OnClick([this]() {

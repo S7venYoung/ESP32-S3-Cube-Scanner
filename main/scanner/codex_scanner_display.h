@@ -11,6 +11,7 @@ public:
     void SetupUI() override;
     void SetDashboardTheme(const std::string& theme);
     void RegisterDashboardTools();
+    void NextDashboardTheme();
     void UpdateStatusBar(bool update_all = false) override;
     void ClearChatMessages() override {}
     void SetStatus(const char* status) override;

@@ -237,6 +237,11 @@ void CodexScannerDisplay::SetDashboardTheme(const std::string& theme) {
     lv_obj_move_foreground(notice_panel_);
 }
 
+void CodexScannerDisplay::NextDashboardTheme() {
+    // Called on the application queue, like voice and MCP theme changes.
+    SetDashboardTheme(mac_theme_ ? "codex" : "macintosh");
+}
+
 void CodexScannerDisplay::UpdateMacintosh() {
     if (!mac_theme_ || mac_dashboard_==nullptr) return;
     const auto sample=GetCodexSnapshot();
