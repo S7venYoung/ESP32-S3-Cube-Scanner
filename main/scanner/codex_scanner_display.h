@@ -9,6 +9,8 @@ class CodexScannerDisplay : public SpiLcdDisplay {
 public:
     using SpiLcdDisplay::SpiLcdDisplay;
     void SetupUI() override;
+    void SetDashboardTheme(const std::string& theme);
+    void RegisterDashboardTools();
     void UpdateStatusBar(bool update_all = false) override;
     void ClearChatMessages() override {}
     void SetStatus(const char* status) override;
@@ -25,6 +27,16 @@ protected:
 private:
     void UpdateAssistantOverlay();  // Caller holds the LVGL lock.
     void UpdateMetrics();
+    void SetupMacintosh();
+    void UpdateMacintosh();
+    bool mac_theme_ = false;
+    lv_obj_t* mac_dashboard_ = nullptr;
+    lv_obj_t* mac_transport_ = nullptr;
+    lv_obj_t* mac_quota_ = nullptr;
+    lv_obj_t* mac_tokens_ = nullptr;
+    lv_obj_t* mac_clock_ = nullptr;
+    lv_obj_t* mac_battery_ = nullptr;
+    int shown_mac_minute_ = -1;
     lv_obj_t* quota_text_ = nullptr;
     lv_obj_t* week_text_ = nullptr;
     lv_obj_t* tokens_text_ = nullptr;

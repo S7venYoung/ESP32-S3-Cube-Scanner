@@ -32,3 +32,8 @@ and activation settings; back up the old flash if those must be retained.
 Host tests and a successful Actions build do not establish hardware correctness.
 Validate boot/no flicker, USB and Wi-Fi quotas, charging, wake/listen/speech,
 buttons and reconnect on the physical unit after flashing.
+# 麦金塔第二主题
+
+默认仍为 Codex。说“你好小智”唤醒，然后说“切换迈克主题”或“切换麦金塔主题”；说“切换 Codex 主题”返回。选项保存，重启后保留。
+
+麦金塔页面以像素绘制文字和复古窗口，保留 USB / Wi-Fi、Cube 自身电量、5 小时 / 7 天剩余额度与今日用量。键盘层、WPM、左右键盘电量尚无真实数据源，显示 `--`；不显示示例数值。小智唤醒时仍悬浮在主题上。

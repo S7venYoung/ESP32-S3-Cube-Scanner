@@ -1,13 +1,20 @@
 #include "codex_scanner_display.h"
 
+#include "application.h"
+#include "board.h"
+#include "codex_metrics.h"
+#include "codex_draw.h"
+#include "macintosh_theme.h"
+#include "dashboard_command.h"
+#include "settings.h"
+#include "mcp_server.h"
 #include <esp_timer.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include "application.h"
-#include "board.h"
-#include "codex_draw.h"
-#include "codex_metrics.h"
+#include <ctime>
+
+
 
 namespace {
 constexpr uint32_t kInk = 0x101411;
@@ -40,8 +47,8 @@ lv_obj_t* Text(lv_obj_t* parent, const char* text, int x, int y, int w, uint32_t
     return obj;
 }
 
-lv_obj_t* Impact(lv_obj_t* parent, const char* text, int x, int y, int w, uint32_t color,
-                 int size = 16, bool centered = false) {
+lv_obj_t* Impact(lv_obj_t* parent, const char* text, int x, int y, int w,
+                 uint32_t color, int size = 16, bool centered = false) {
     return CodexDrawText(parent, text, x, y, w, color, size, centered);
 }
 
@@ -58,13 +65,10 @@ void CodexScannerDisplay::SetupUI() {
     // Retain its status objects and hardware warning popups.
     SpiLcdDisplay::SetupUI();
     DisplayLockGuard lock(this);
-    if (dashboard_ != nullptr)
-        return;
+    if (dashboard_ != nullptr) return;
     lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
-    if (emoji_label_)
-        lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
-    if (emoji_image_)
-        lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+    if (emoji_label_) lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    if (emoji_image_) lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     dashboard_ = Panel(lv_screen_active(), 0, 0, width_, height_, kInk, 0);
     Impact(dashboard_, "CODEX", 10, 9, 56, kYellow, 20);
     Impact(dashboard_, "// SOFLE", 68, 9, 87, kPaper, 20);
@@ -101,8 +105,7 @@ void CodexScannerDisplay::SetupUI() {
     Impact(state, "WPM", 132, 4, 35, kMuted);
     Impact(state, "--", 177, 2, 40, kYellow, 20);
     for (int i = 0; i < 2; ++i) {
-        auto* battery =
-            Outline(dashboard_, i == 0 ? 6 : 122, 208, i == 0 ? 110 : 112, 26, kMuted, 7);
+        auto* battery = Outline(dashboard_, i == 0 ? 6 : 122, 208, i == 0 ? 110 : 112, 26, kMuted, 7);
         Impact(battery, i == 0 ? "L" : "R", 7, 4, 13, kMuted);
         Impact(battery, "--%", 24, 4, 35, kPaper);
         Outline(battery, 66, 8, 33, 10, kMuted, 2);
@@ -135,21 +138,135 @@ void CodexScannerDisplay::SetupUI() {
     high_temp_popup_ = Panel(lv_screen_active(), 8, 184, 224, 48, kRed, 10);
     Impact(high_temp_popup_, "CPU HOT", 12, 12, 200, kPaper, 20, true);
     lv_obj_add_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
+    SetupMacintosh();
+    Settings dashboard_settings("cube_display");
+    mac_theme_ = dashboard_settings.GetString("dashboard", "codex") == "macintosh";
+    if (!mac_theme_) lv_obj_add_flag(mac_dashboard_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(assistant_overlay_);
+    lv_obj_move_foreground(notice_panel_);
     UpdateAssistantOverlay();
     UpdateMetrics();
 }
 
+void CodexScannerDisplay::RegisterDashboardTools() {
+    McpServer::GetInstance().AddTool("self.screen.set_dashboard_theme",
+        "Switch Cube dashboard. theme=macintosh for Macintosh, Mac, 迈克主题 or 麦金塔主题; theme=codex for Codex主题. Preserve Xiaozhi voice and quota sync.",
+        PropertyList({Property("theme", kPropertyTypeString)}),
+        [this](const PropertyList& properties) -> ReturnValue {
+            const auto theme = properties["theme"].value<std::string>();
+            if (theme != "codex" && theme != "macintosh") return false;
+            Application::GetInstance().Schedule([this, theme]() { SetDashboardTheme(theme); });
+            return true;
+        });
+}
+
+void CodexScannerDisplay::SetupMacintosh() {
+    mac_dashboard_ = Panel(dashboard_,0,0,width_,height_,kMacPaper,0);
+    auto rect = [](lv_obj_t* p,int x,int y,int w,int h) {
+        auto* frame=Panel(p,x,y,w,h,kMacPaper,0);
+        lv_obj_set_style_border_color(frame,lv_color_hex(kMacInk),0);
+        lv_obj_set_style_border_width(frame,1,0);
+        return frame;
+    };
+    auto card = [&](int x,int y,int w,int h) {
+        Panel(mac_dashboard_,x+3,y+3,w,h,kMacInk,0);
+        auto* frame=rect(mac_dashboard_,x,y,w,h);
+        rect(frame,2,2,w-4,h-4);
+        return frame;
+    };
+    // Pixel bevels and double rules reproduce a monochrome compact Macintosh.
+    Panel(mac_dashboard_,8,28,224,1,kMacInk,0);
+    MacintoshText(mac_dashboard_,"ZMK DONGLE",30,10,112,1);
+    auto* logo=rect(mac_dashboard_,10,5,15,20);
+    rect(logo,2,2,11,12);
+    Panel(logo,5,6,1,2,kMacInk,0);Panel(logo,9,6,1,2,kMacInk,0);
+    Panel(logo,6,11,4,1,kMacInk,0);Panel(logo,4,16,7,1,kMacInk,0);
+    mac_battery_=MacintoshText(mac_dashboard_,"--%",146,10,32,1);
+    mac_transport_=MacintoshText(mac_dashboard_,"OFFLINE",183,10,49,1);
+    for(int i=0;i<2;++i) {
+        auto* kb=card(i==0?8:182,43,48,73);
+        MacintoshText(kb,i==0?"L KB":"R KB",3,8,42,1,true);
+        Panel(kb,4,23,40,1,kMacInk,0);
+        rect(kb,8,31,30,15);Panel(kb,38,36,2,5,kMacInk,0);
+        MacintoshText(kb,"--%",4,53,40,1,true);
+    }
+    auto* monitor=card(65,34,108,77);
+    for(int y=4;y<12;y+=3) Panel(monitor,4,y,100,1,kMacInk,0);
+    rect(monitor,3,15,102,58);
+    MacintoshText(monitor,"LAYER",8,22,92,1,true);
+    MacintoshText(monitor,"--",8,38,92,4,true);
+    for(int i=0;i<4;++i) {
+        auto* key=rect(mac_dashboard_,65+i*28,120,24,23);
+        const char* names[]={"CTL","ALT","GUI","SFT"};
+        MacintoshText(key,names[i],2,4,20,1,true);
+        rect(key,10,15,4,4); // Unfilled: modifier telemetry is unavailable.
+    }
+    auto* radio=card(8,152,74,48);
+    MacintoshText(radio,"CH --",5,7,64,1);
+    Panel(radio,4,20,66,1,kMacInk,0);
+    MacintoshText(radio,"BLE --",5,28,64,1);
+    auto* wpm=card(158,152,74,48);
+    MacintoshText(wpm,"WPM",5,7,64,1);
+    Panel(wpm,4,20,66,1,kMacInk,0);
+    MacintoshText(wpm,"--",6,27,60,2,true);
+    auto* happy=rect(mac_dashboard_,94,150,46,49);
+    rect(happy,5,4,36,30);
+    Panel(happy,14,11,2,5,kMacInk,0);Panel(happy,29,11,2,5,kMacInk,0);
+    Panel(happy,21,16,2,6,kMacInk,0);
+    Panel(happy,14,25,16,2,kMacInk,0);
+    Panel(happy,12,22,2,3,kMacInk,0);Panel(happy,30,22,2,3,kMacInk,0);
+    Panel(happy,8,39,7,2,kMacInk,0);Panel(happy,30,39,7,2,kMacInk,0);
+    Panel(mac_dashboard_,8,207,224,1,kMacInk,0);
+    mac_quota_=MacintoshText(mac_dashboard_,"5H --% 7D --%",8,213,222,1);
+    mac_tokens_=MacintoshText(mac_dashboard_,"TODAY --",8,228,172,1);
+    mac_clock_=MacintoshText(mac_dashboard_,"--:--",193,228,37,1);
+}
+
+void CodexScannerDisplay::SetDashboardTheme(const std::string& theme) {
+    if (theme != "codex" && theme != "macintosh") return;
+    DisplayLockGuard lock(this);
+    if (mac_dashboard_ == nullptr) return;
+    if (mac_theme_ == (theme == "macintosh")) return;
+    mac_theme_ = theme == "macintosh";
+    if (mac_theme_) lv_obj_remove_flag(mac_dashboard_,LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(mac_dashboard_,LV_OBJ_FLAG_HIDDEN);
+    Settings settings("cube_display",true);
+    settings.SetString("dashboard",theme);
+    UpdateMacintosh();
+    lv_obj_move_foreground(assistant_overlay_);
+    lv_obj_move_foreground(notice_panel_);
+}
+
+void CodexScannerDisplay::UpdateMacintosh() {
+    if (!mac_theme_ || mac_dashboard_==nullptr) return;
+    const auto sample=GetCodexSnapshot();
+    MacintoshSetText(mac_transport_,sample.transport);
+    char primary[12]="--%",weekly[12]="--%",line[64];
+    if(sample.online && sample.metrics.left>=0) std::snprintf(primary,sizeof(primary),"%d%%",sample.metrics.left);
+    if(sample.online && sample.metrics.week_left>=0) std::snprintf(weekly,sizeof(weekly),"%d%%",sample.metrics.week_left);
+    std::snprintf(line,sizeof(line),"5H %s  7D %s",primary,weekly);MacintoshSetText(mac_quota_,line);
+    if(!sample.online || sample.metrics.tokens<0) std::snprintf(line,sizeof(line),"TODAY --");
+    else if(sample.metrics.tokens>=1000000) std::snprintf(line,sizeof(line),"TODAY %.1fM",sample.metrics.tokens/1000000.0);
+    else if(sample.metrics.tokens>=1000) std::snprintf(line,sizeof(line),"TODAY %.1fK",sample.metrics.tokens/1000.0);
+    else std::snprintf(line,sizeof(line),"TODAY %lld",static_cast<long long>(sample.metrics.tokens));
+    MacintoshSetText(mac_tokens_,line);
+    const auto now=std::time(nullptr);
+    if(now>1577836800) {
+        std::tm time={};localtime_r(&now,&time);
+        const int minute=time.tm_hour*60+time.tm_min;
+        if(minute!=shown_mac_minute_) { shown_mac_minute_=minute;
+            std::snprintf(line,sizeof(line),"%02d:%02d",time.tm_hour,time.tm_min);MacintoshSetText(mac_clock_,line); }
+    }
+}
+
 void CodexScannerDisplay::UpdateMetrics() {
-    if (quota_text_ == nullptr)
-        return;
+    if (quota_text_ == nullptr) return;
     const auto sample = GetCodexSnapshot();
     CodexDrawSetText(scan_status_, sample.transport);
     lv_obj_set_style_bg_color(scan_dot_, lv_color_hex(sample.online ? kGreen : kMuted), 0);
     char text[32];
-    if (sample.online && sample.metrics.left >= 0)
-        std::snprintf(text, sizeof(text), "%d%%", sample.metrics.left);
-    else
-        std::snprintf(text, sizeof(text), "--%%");
+    if (sample.online && sample.metrics.left >= 0) std::snprintf(text, sizeof(text), "%d%%", sample.metrics.left);
+    else std::snprintf(text, sizeof(text), "--%%");
     CodexDrawSetText(quota_text_, text);
     if (sample.online && sample.metrics.week_left >= 0) {
         std::snprintf(text, sizeof(text), "%d%%", sample.metrics.week_left);
@@ -157,50 +274,32 @@ void CodexScannerDisplay::UpdateMetrics() {
         std::snprintf(text, sizeof(text), "--%%");
     }
     CodexDrawSetText(week_text_, text);
-    const int segments = sample.online && sample.metrics.week_left >= 0
-                             ? (sample.metrics.week_left * 6 + 99) / 100
-                             : 0;
-    for (int i = 0; i < 6; ++i)
-        lv_obj_set_style_bg_color(week_segments_[i], lv_color_hex(i < segments ? kYellow : kMuted),
-                                  0);
-    if (!sample.online || sample.metrics.tokens < 0)
-        std::snprintf(text, sizeof(text), "--");
-    else if (sample.metrics.tokens >= 1000000)
-        std::snprintf(text, sizeof(text), "%.1fM", sample.metrics.tokens / 1000000.0);
-    else if (sample.metrics.tokens >= 1000)
-        std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
-    else
-        std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
+    const int segments = sample.online && sample.metrics.week_left >= 0 ?
+        (sample.metrics.week_left * 6 + 99) / 100 : 0;
+    for (int i = 0; i < 6; ++i) lv_obj_set_style_bg_color(week_segments_[i],
+        lv_color_hex(i < segments ? kYellow : kMuted), 0);
+    if (!sample.online || sample.metrics.tokens < 0) std::snprintf(text, sizeof(text), "--");
+    else if (sample.metrics.tokens >= 1000000) std::snprintf(text, sizeof(text), "%.1fM", sample.metrics.tokens / 1000000.0);
+    else if (sample.metrics.tokens >= 1000) std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
+    else std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
     CodexDrawSetText(tokens_text_, text);
+    UpdateMacintosh();
 }
 
 void CodexScannerDisplay::UpdateAssistantOverlay() {
-    if (assistant_overlay_ == nullptr)
-        return;
+    if (assistant_overlay_ == nullptr) return;
     uint32_t color = kMuted;
     const auto state = Application::GetInstance().GetDeviceState();
     switch (state) {
-        case kDeviceStateListening:
-            color = kYellow;
-            break;
-        case kDeviceStateSpeaking:
-            color = kGreen;
-            break;
-        case kDeviceStateConnecting:
-            color = 0x49A5F0;
-            break;
+        case kDeviceStateListening: color = kYellow; break;
+        case kDeviceStateSpeaking: color = kGreen; break;
+        case kDeviceStateConnecting: color = 0x49A5F0; break;
         case kDeviceStateWifiConfiguring:
-        case kDeviceStateActivating:
-            color = 0xFF902B;
-            break;
-        case kDeviceStateFatalError:
-            color = kRed;
-            break;
-        default:
-            break;
+        case kDeviceStateActivating: color = 0xFF902B; break;
+        case kDeviceStateFatalError: color = kRed; break;
+        default: break;
     }
-    if (shown_assistant_state_ == static_cast<int>(state))
-        return;
+    if (shown_assistant_state_ == static_cast<int>(state)) return;
     shown_assistant_state_ = static_cast<int>(state);
     const bool active = state == kDeviceStateListening || state == kDeviceStateSpeaking ||
                         state == kDeviceStateConnecting;
@@ -209,9 +308,8 @@ void CodexScannerDisplay::UpdateAssistantOverlay() {
         lv_obj_add_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    CodexDrawSetText(assistant_overlay_text_, state == kDeviceStateListening  ? "LISTENING"
-                                              : state == kDeviceStateSpeaking ? "SPEAKING"
-                                                                              : "CONNECTING");
+    CodexDrawSetText(assistant_overlay_text_, state == kDeviceStateListening ? "LISTENING" :
+        state == kDeviceStateSpeaking ? "SPEAKING" : "CONNECTING");
     lv_obj_set_style_border_color(assistant_overlay_, lv_color_hex(color), 0);
     lv_obj_remove_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(assistant_orb_, nullptr);
@@ -238,14 +336,19 @@ void CodexScannerDisplay::SetStatus(const char* status) {
 }
 
 void CodexScannerDisplay::SetChatMessage(const char* role, const char* content) {
+    if (role != nullptr && content != nullptr && std::strcmp(role,"user")==0) {
+        const auto intent=DashboardVoiceIntent(content);
+        if(intent!=DashboardVoiceCommand::None) {
+            const std::string theme=intent==DashboardVoiceCommand::Macintosh?"macintosh":"codex";
+            Application::GetInstance().Schedule([this,theme]() { SetDashboardTheme(theme); });
+        }
+        return;
+    }
     // Keep spoken conversation off the dashboard, while retaining important
     // first-use Wi-Fi and activation instructions from the native app.
-    if (role == nullptr || content == nullptr || content[0] == '\0' ||
-        std::strcmp(role, "system") != 0)
-        return;
+    if (role == nullptr || content == nullptr || content[0] == '\0' || std::strcmp(role, "system") != 0) return;
     const auto state = Application::GetInstance().GetDeviceState();
-    if (state != kDeviceStateIdle && state != kDeviceStateListening &&
-        state != kDeviceStateSpeaking) {
+    if (state != kDeviceStateIdle && state != kDeviceStateListening && state != kDeviceStateSpeaking) {
         ShowNotification(content, 10000);
     }
 }
@@ -255,8 +358,7 @@ void CodexScannerDisplay::ShowNotification(const std::string& text, int duration
 }
 
 void CodexScannerDisplay::ShowNotification(const char* text, int duration_ms) {
-    if (text == nullptr || notice_panel_ == nullptr)
-        return;
+    if (text == nullptr || notice_panel_ == nullptr) return;
     DisplayLockGuard lock(this);
     lv_label_set_text(notice_text_, text);
     notice_until_us_ = esp_timer_get_time() + static_cast<int64_t>(std::max(0, duration_ms)) * 1000;
@@ -273,12 +375,9 @@ void CodexScannerDisplay::UpdateStatusBar(bool update_all) {
     float temperature = 0;
     const bool has_temperature = board.GetTemperature(temperature);
     DisplayLockGuard lock(this);
-    if (dashboard_ == nullptr)
-        return;
-    if (has_temperature && temperature >= 75)
-        lv_obj_remove_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
+    if (dashboard_ == nullptr) return;
+    if (has_temperature && temperature >= 75) lv_obj_remove_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
     UpdateAssistantOverlay();
     char text[24];
     UpdateMetrics();
@@ -287,20 +386,16 @@ void CodexScannerDisplay::UpdateStatusBar(bool update_all) {
         (battery_level != shown_battery_level_ || charging != shown_charging_)) {
         shown_battery_level_ = battery_level;
         shown_charging_ = charging;
-        if (has_battery)
-            std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+" : "", battery_level);
-        else
-            std::snprintf(text, sizeof(text), "--%%");
+        if (has_battery) std::snprintf(text, sizeof(text), "%s%d%%", charging ? "+" : "", battery_level);
+        else std::snprintf(text, sizeof(text), "--%%");
         CodexDrawSetText(battery_text_, text);
+        MacintoshSetText(mac_battery_,text);
         if (battery_level <= 0) {
             lv_obj_add_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_set_width(cube_battery_fill_, std::max(1, (battery_level * 14 + 99) / 100));
             lv_obj_set_style_bg_color(cube_battery_fill_,
-                                      lv_color_hex(charging              ? kGreen
-                                                   : battery_level <= 20 ? kRed
-                                                                         : kYellow),
-                                      0);
+                lv_color_hex(charging ? kGreen : battery_level <= 20 ? kRed : kYellow), 0);
             lv_obj_remove_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
         }
     }
@@ -310,10 +405,8 @@ void CodexScannerDisplay::UpdateStatusBar(bool update_all) {
 }
 
 void CodexScannerDisplay::UpdateScanner(const std::vector<ScannerDevice>& devices, bool scanning,
-                                        const std::string& filter) {
+                                      const std::string& filter) {
     // BLE discovery alone cannot supply layers/WPM/batteries. Keep those
     // fields unavailable until the real ZMK telemetry protocol is connected.
-    (void)devices;
-    (void)scanning;
-    (void)filter;
+    (void)devices; (void)scanning; (void)filter;
 }

@@ -1,14 +1,14 @@
-#include "application.h"
-#include "assets/lang_config.h"
-#include "button.h"
-#include "codecs/no_audio_codec.h"
-#include "config.h"
-#include "led/single_led.h"
-#include "power_manager.h"
-#include "power_save_timer.h"
-#include "system_reset.h"
 #include "wifi_board.h"
+#include "codecs/no_audio_codec.h"
 #include "zhengchen_lcd_display.h"
+#include "system_reset.h"
+#include "application.h"
+#include "button.h"
+#include "config.h"
+#include "power_save_timer.h"
+#include "led/single_led.h"
+#include "assets/lang_config.h"
+#include "power_manager.h"
 #if CONFIG_ZMK_SCANNER_MODE
 #include "scanner/codex_scanner_display.h"
 #include "scanner/zmk_scanner.h"
@@ -18,8 +18,8 @@ using BoardDisplay = CodexScannerDisplay;
 using BoardDisplay = ZHENGCHEN_LcdDisplay;
 #endif
 
-#include <esp_lcd_panel_vendor.h>
 #include <esp_log.h>
+#include <esp_lcd_panel_vendor.h>
 
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -40,8 +40,9 @@ private:
     void InitializePowerManager() {
         power_manager_ = new PowerManager(GPIO_NUM_9);
 #if !CONFIG_ZMK_SCANNER_MODE
-        power_manager_->OnTemperatureChanged(
-            [this](float chip_temp) { display_->UpdateHighTempWarning(chip_temp); });
+        power_manager_->OnTemperatureChanged([this](float chip_temp) {
+            display_->UpdateHighTempWarning(chip_temp);
+        });
 #endif
 
         power_manager_->OnChargingStatusChanged([this](bool is_charging) {
@@ -53,6 +54,7 @@ private:
                 ESP_LOGI("PowerManager", "Charging stopped");
             }
         });
+    
     }
 
     void InitializePowerSaveTimer() {
@@ -90,15 +92,16 @@ private:
     }
 
     void InitializeButtons() {
+        
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
             Application::GetInstance().Schedule([this]() {
-                auto& app = Application::GetInstance();
-                if (app.GetDeviceState() == kDeviceStateStarting) {
-                    EnterWifiConfigMode();
-                    return;
-                }
-                app.ToggleChatState();
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting) {
+                EnterWifiConfigMode();
+                return;
+            }
+            app.ToggleChatState();
             });
         });
 
@@ -108,13 +111,13 @@ private:
             power_save_timer_->WakeUp();
             // 获取应用程序实例
             auto& app = Application::GetInstance();
-
+            
             // 进入配网模式
             app.Schedule([this]() {
                 Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
                 EnterWifiConfigMode();
             });
-
+            
             // 重置WiFi配置以确保进入配网模式
         });
 
@@ -126,7 +129,7 @@ private:
                 volume = 100;
             }
             codec->SetOutputVolume(volume);
-            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume / 10));
+            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume/10));
         });
 
         volume_up_button_.OnLongPress([this]() {
@@ -143,7 +146,7 @@ private:
                 volume = 0;
             }
             codec->SetOutputVolume(volume);
-            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume / 10));
+            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume/10));
         });
 
         volume_down_button_.OnLongPress([this]() {
@@ -177,15 +180,18 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
 
-        display_ =
-            new BoardDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X,
-                             DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        display_ = new BoardDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
 #if !CONFIG_ZMK_SCANNER_MODE
         display_->SetupHighTempWarningPopup();
 #endif
     }
 
-    void InitializeTools() {}
+    void InitializeTools() {
+#if CONFIG_ZMK_SCANNER_MODE
+        display_->RegisterDashboardTools();
+#endif
+    }
 
 public:
 #if CONFIG_ZMK_SCANNER_MODE
@@ -196,8 +202,7 @@ public:
 
     void SetNetworkEventCallback(NetworkEventCallback callback) override {
         WifiBoard::SetNetworkEventCallback([callback](NetworkEvent event, const std::string& data) {
-            if (callback)
-                callback(event, data);
+            if (callback) callback(event, data);
             if (event == NetworkEvent::Connected) {
                 Application::GetInstance().Schedule([]() {
                     static bool scanner_started = false;
@@ -210,14 +215,14 @@ public:
         });
     }
 #endif
-    ZHENGCHEN_1_54TFT_WIFI()
-        : boot_button_(BOOT_BUTTON_GPIO),
-          volume_up_button_(VOLUME_UP_BUTTON_GPIO),
-          volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
+    ZHENGCHEN_1_54TFT_WIFI() :
+        boot_button_(BOOT_BUTTON_GPIO),
+        volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
         InitializePowerSaveTimer();
         InitializeSpi();
         InitializeButtons();
-        InitializeSt7789Display();
+        InitializeSt7789Display();  
         InitializePowerManager();
         InitializeTools();
         GetBacklight()->RestoreBrightness();
@@ -227,15 +232,15 @@ public:
     virtual AudioCodec* GetAudioCodec() override {
         // 静态实例化NoAudioCodecSimplex类
         static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-                                               AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK,
-                                               AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK,
-                                               AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
+            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
         // 返回音频编解码器
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override { return display_; }
-
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
+    
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
@@ -257,7 +262,7 @@ public:
         return true;
     }
 
-    virtual bool GetTemperature(float& esp32temp) override {
+    virtual bool GetTemperature(float& esp32temp)  override {
         esp32temp = power_manager_->GetTemperature();
         return true;
     }
