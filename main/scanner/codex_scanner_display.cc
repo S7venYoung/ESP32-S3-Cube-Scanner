@@ -106,6 +106,24 @@ void CodexScannerDisplay::SetupUI() {
         Panel(battery, 99, 11, 2, 4, kMuted, 0);
     }
 
+    // A temporary Siri-like surface floats above the unchanged dashboard.
+    assistant_overlay_ = Outline(dashboard_, 8, 181, 224, 51, 0x49A5F0, 15);
+    lv_obj_set_style_bg_opa(assistant_overlay_, LV_OPA_90, 0);
+    assistant_orb_ = Outline(assistant_overlay_, 13, 9, 34, 34, 0x49A5F0, 17);
+    lv_obj_set_style_border_width(assistant_orb_, 2, 0);
+    lv_obj_set_style_shadow_color(assistant_orb_, lv_color_hex(0x49A5F0), 0);
+    lv_obj_set_style_shadow_width(assistant_orb_, 10, 0);
+    lv_obj_set_style_shadow_opa(assistant_orb_, LV_OPA_50, 0);
+    auto* cyan = Panel(assistant_orb_, 4, 5, 18, 18, 0x39DCEB, 9);
+    auto* purple = Panel(assistant_orb_, 12, 7, 17, 17, 0x9865EB, 9);
+    auto* pink = Panel(assistant_orb_, 8, 15, 15, 15, 0xF065B8, 8);
+    lv_obj_set_style_bg_opa(cyan, LV_OPA_80, 0);
+    lv_obj_set_style_bg_opa(purple, LV_OPA_80, 0);
+    lv_obj_set_style_bg_opa(pink, LV_OPA_80, 0);
+    assistant_overlay_text_ = Impact(assistant_overlay_, "LISTENING", 62, 17, 152, kPaper);
+    lv_obj_add_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
+
+    // Native setup/activation notices and hardware alarms remain above it.
     notice_panel_ = Panel(dashboard_, 8, 181, 224, 51, kYellow);
     notice_text_ = Text(notice_panel_, "", 7, 5, 210, kInk);
     lv_obj_set_height(notice_text_, 43);
@@ -145,7 +163,8 @@ void CodexScannerDisplay::UpdateMetrics() {
 void CodexScannerDisplay::UpdateAssistantDot() {
     if (assistant_dot_ == nullptr) return;
     uint32_t color = kMuted;
-    switch (Application::GetInstance().GetDeviceState()) {
+    const auto state = Application::GetInstance().GetDeviceState();
+    switch (state) {
         case kDeviceStateListening: color = kYellow; break;
         case kDeviceStateSpeaking: color = kGreen; break;
         case kDeviceStateConnecting: color = 0x49A5F0; break;
@@ -155,6 +174,31 @@ void CodexScannerDisplay::UpdateAssistantDot() {
         default: break;
     }
     lv_obj_set_style_bg_color(assistant_dot_, lv_color_hex(color), 0);
+    if (assistant_overlay_ == nullptr || shown_assistant_state_ == static_cast<int>(state)) return;
+    shown_assistant_state_ = static_cast<int>(state);
+    const bool active = state == kDeviceStateListening || state == kDeviceStateSpeaking ||
+                        state == kDeviceStateConnecting;
+    if (!active) {
+        lv_anim_delete(assistant_orb_, nullptr);
+        lv_obj_add_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    CodexDrawSetText(assistant_overlay_text_, state == kDeviceStateListening ? "LISTENING" :
+        state == kDeviceStateSpeaking ? "SPEAKING" : "CONNECTING");
+    lv_obj_set_style_border_color(assistant_overlay_, lv_color_hex(color), 0);
+    lv_obj_remove_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
+    lv_anim_delete(assistant_orb_, nullptr);
+    lv_anim_t animation;
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, assistant_orb_);
+    lv_anim_set_exec_cb(&animation, [](void* object, int32_t opacity) {
+        lv_obj_set_style_opa(static_cast<lv_obj_t*>(object), static_cast<lv_opa_t>(opacity), 0);
+    });
+    lv_anim_set_values(&animation, 150, 255);
+    lv_anim_set_duration(&animation, state == kDeviceStateSpeaking ? 450 : 850);
+    lv_anim_set_playback_duration(&animation, state == kDeviceStateSpeaking ? 450 : 850);
+    lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&animation);
 }
 
 void CodexScannerDisplay::SetStatus(const char* status) {

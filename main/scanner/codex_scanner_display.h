@@ -30,6 +30,10 @@ private:
     lv_obj_t* week_segments_[6] = {};
     lv_obj_t* dashboard_ = nullptr;
     lv_obj_t* assistant_dot_ = nullptr;
+    lv_obj_t* assistant_overlay_ = nullptr;
+    lv_obj_t* assistant_orb_ = nullptr;
+    lv_obj_t* assistant_overlay_text_ = nullptr;
+    int shown_assistant_state_ = -1;
     lv_obj_t* scan_dot_ = nullptr;
     lv_obj_t* scan_status_ = nullptr;
     lv_obj_t* filter_label_ = nullptr;
