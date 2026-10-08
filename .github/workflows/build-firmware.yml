@@ -1,60 +1,8 @@
-name: Build Zhengchen 1.54 Xiaozhi Codex firmware
-
+name: Legacy firmware build (archived)
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-
-permissions:
-  contents: read
-
 jobs:
-  build:
+  archived:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - name: Validate Codex transport parser
-        run: g++ -std=c++17 -Wall -Wextra -Werror tests/codex_protocol_test.cc -o /tmp/codex-protocol-test && /tmp/codex-protocol-test
-      - name: Validate direct-drawing coverage masks
-        run: g++ -std=c++17 -Wall -Wextra -Werror tests/codex2_drawing_test.cc -o /tmp/codex-drawing-test && /tmp/codex-drawing-test
-      - name: Build Zhengchen Wi-Fi firmware and complete image
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.2
-          target: esp32s3
-          path: .
-          command: >-
-            idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.scanner" -D BOARD_NAME=zhengchen-1.54tft-wifi build
-            && idf.py merge-bin
-            && cp build/xiaozhi.bin build/zhengchen_154_wifi_codex.bin
-            && cd build
-            && sha256sum merged-binary.bin zhengchen_154_wifi_codex.bin > SHA256SUMS
-      - name: Verify startup memory settings
-        run: |
-          grep -qx 'CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y' sdkconfig
-          grep -qx 'CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024' sdkconfig
-          grep -qx 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' sdkconfig
-          grep -qx '# CONFIG_BT_NIMBLE_ROLE_CENTRAL is not set' sdkconfig
-          grep -qx '# CONFIG_BT_NIMBLE_ROLE_PERIPHERAL is not set' sdkconfig
-      - name: Package firmware, models and flash metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: Zhengchen-154-WiFi-Codex-firmware
-          path: |
-            build/merged-binary.bin
-            build/zhengchen_154_wifi_codex.bin
-            build/xiaozhi.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
-            build/ota_data_initial.bin
-            build/srmodels/srmodels.bin
-            build/flash_args
-            build/flasher_args.json
-            build/SHA256SUMS
-            sdkconfig
-            docs/codex-scanner.md
-            docs/codex-sync.md
-            docs/startup-reboot-fix.md
-          if-no-files-found: error
-          retention-days: 30
+      - run: echo 'Use Build Zhengchen Cube Codex v2.5 instead.'

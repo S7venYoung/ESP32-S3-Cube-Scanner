@@ -1,0 +1,58 @@
+name: Build Zhengchen Cube Codex v2.5
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: cube-firmware-main
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned v2.5 source (first migration only)
+        run: bash .migration-v25/source/scripts/prepare-cube-v25.sh
+      - name: Format touched integration files
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-format
+          clang-format -i main/scanner/codex_draw.{cc,h} main/scanner/codex_scanner_display.{cc,h} main/scanner/codex_sync.cc main/scanner/zmk_scanner.{cc,h} main/boards/zhengchen/1.54tft-wifi/zhengchen-1.54tft-wifi.cc main/boards/zhengchen/1.54tft-wifi/power_manager.h
+      - name: Compile and merge complete firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          path: .
+          command: bash scripts/build-cube-v25.sh
+      - name: Publish migrated source only after successful compilation
+        if: env.CUBE_MIGRATED == 'true'
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" .
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'Upgrade to official Xiaozhi v2.5.0 with Zhengchen Codex variant'
+          git push origin HEAD:main
+      - name: Upload verified firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhengchen-154-Codex-v2.5.0-firmware
+          path: |
+            build/merged-binary.bin
+            build/zhengchen_154_wifi_codex.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            build/assets.bin
+            build/flash_args
+            build/flasher_args.json
+            build/sdkconfig
+            build/SHA256SUMS
+            build/FLASHING.md
+          if-no-files-found: error
+          retention-days: 30
