@@ -45,10 +45,11 @@ jobs:
           path: |
             build/merged-binary.bin
             build/zhengchen_154_wifi_codex.bin
+            build/xiaozhi.bin
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
             build/ota_data_initial.bin
-            build/assets.bin
+            build/generated_assets.bin
             build/flash_args
             build/flasher_args.json
             build/sdkconfig
