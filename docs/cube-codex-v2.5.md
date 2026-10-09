@@ -35,6 +35,8 @@ Validate boot/no flicker, USB and Wi-Fi quotas, charging, wake/listen/speech,
 buttons and reconnect on the physical unit after flashing.
 # 麦金塔第二主题
 
+新增独立 `ff ff ab ce 01` 格斗遥测包：Cube 接收左右 WPM、电量和修饰符，麦金塔 WPM 区显示 `左/右`。3 秒无包时速度恢复 `--/--`，不以总 WPM 代替。须配合 `zmk-sofle-dongle-dya/fighting-theme` 新版接收器广播，名称过滤若启用须允许 `CUBE-FIGHT`。原版 26 字节 Prospector 广播不变。街霸彩色角色动画主题尚未实现。
+
 默认仍为 Codex。说“你好小智”唤醒，然后说“切换迈克主题”或“切换麦金塔主题”；说“切换 Codex 主题”返回。选项保存，重启后保留。
 
 长按音量加键循环切换 Codex / 麦金塔主题；短按加减音量不变。Codex 变体不再使用长按音量加键设置最大音量；音量减键原有操作保持不变。

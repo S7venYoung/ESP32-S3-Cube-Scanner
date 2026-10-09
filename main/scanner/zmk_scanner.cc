@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <mutex>
 
 namespace {
 constexpr char kTag[] = "ZmkScanner";
@@ -27,9 +28,23 @@ int64_t last_refresh_us = 0;
 std::string modifier_address;
 int64_t modifier_seen_us = -1;
 uint8_t modifier_state = 0;
+std::mutex fight_mutex;
+FightTelemetry fight_data;
+int64_t fight_seen_us = -1;
 void BeginDiscovery();
 
 void ExpireModifiers(int64_t now) {
+    {
+        std::lock_guard<std::mutex> lock(fight_mutex);
+        if (fight_seen_us>=0 && now-fight_seen_us>3000000) {
+            fight_seen_us=-1;
+            fight_data={};
+            modifier_seen_us=-1;
+            modifier_address.clear();
+            modifier_state=0;
+            Application::GetInstance().Schedule([]() { display->SetMacModifierState(0); });
+        }
+    }
     if (modifier_seen_us >= 0 && now - modifier_seen_us > 60000000) {
         modifier_seen_us = -1;
         modifier_address.clear();
@@ -41,14 +56,35 @@ void ExpireModifiers(int64_t now) {
 void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
                       const std::string& name, int64_t now) {
     if (!name_filter.empty() && name.find(name_filter)==std::string::npos) return;
-    if (!modifier_address.empty() && modifier_address!=address) return;
     const auto* data=event->disc.data;
     const size_t size=event->disc.length_data;
     for (size_t pos=0;pos<size;) {
         const size_t length=data[pos++];
         if (!length || length>size-pos) return;
+        FightTelemetry fight;
+        if (data[pos]==0xff && ParseFightTelemetry(data+pos+1,length-1,fight)) {
+            bool accepted=false;
+            {
+                std::lock_guard<std::mutex> lock(fight_mutex);
+                if (fight_seen_us<0 || now-fight_seen_us>3000000 ||
+                    fight_data.keyboard_id==fight.keyboard_id) {
+                    fight_data=fight;
+                    fight_seen_us=now;
+                    accepted=true;
+                }
+            }
+            if (accepted && fight.modifiers!=modifier_state) {
+                modifier_state=fight.modifiers;
+                modifier_address=address;
+                modifier_seen_us=now;
+                Application::GetInstance().Schedule([fight]() { display->SetMacModifierState(fight.modifiers); });
+            } else if (accepted) modifier_seen_us=now;
+        }
         uint8_t mods=0;
-        if (data[pos]==0xff && ParseProspectorModifiers(data+pos+1,length-1,mods)) {
+        bool fight_active;
+        { std::lock_guard<std::mutex> lock(fight_mutex); fight_active=fight_seen_us>=0 && now-fight_seen_us<=3000000; }
+        if (!fight_active && (modifier_address.empty() || modifier_address==address) &&
+            data[pos]==0xff && ParseProspectorModifiers(data+pos+1,length-1,mods)) {
             modifier_address=address;
             modifier_seen_us=now;
             if (mods!=modifier_state) {
@@ -134,6 +170,12 @@ void HostTask(void*) {
     nimble_port_freertos_deinit();
 }
 }  // namespace
+
+FightTelemetry GetFightTelemetry() {
+    std::lock_guard<std::mutex> lock(fight_mutex);
+    if (fight_seen_us<0 || esp_timer_get_time()-fight_seen_us>3000000) return {};
+    return fight_data;
+}
 
 void StartZmkScanner() {
     // Discovery is optional (it currently supplies names/RSSI, not keyboard

@@ -6,6 +6,7 @@
 #include "codex_draw.h"
 #include "macintosh_theme.h"
 #include "dashboard_command.h"
+#include "zmk_scanner.h"
 #include "settings.h"
 #include "mcp_server.h"
 #include <esp_timer.h>
@@ -207,9 +208,9 @@ void CodexScannerDisplay::SetupMacintosh() {
     Panel(radio,4,20,66,1,kMacInk,0);
     MacintoshText(radio,"BLE --",5,28,64,1);
     auto* wpm=card(158,152,74,48);
-    MacintoshText(wpm,"WPM",5,7,64,1);
+    MacintoshText(wpm,"L/R WPM",5,7,64,1);
     Panel(wpm,4,20,66,1,kMacInk,0);
-    MacintoshText(wpm,"--",6,27,60,2,true);
+    mac_wpm_=MacintoshText(wpm,"--/--",5,28,64,1,true);
     auto* happy=rect(mac_dashboard_,94,150,46,49);
     rect(happy,5,4,36,30);
     Panel(happy,14,11,2,5,kMacInk,0);Panel(happy,29,11,2,5,kMacInk,0);
@@ -256,6 +257,11 @@ void CodexScannerDisplay::SetMacModifierState(uint8_t modifiers) {
 void CodexScannerDisplay::UpdateMacintosh() {
     if (!mac_theme_ || mac_dashboard_==nullptr) return;
     const auto sample=GetCodexSnapshot();
+    const auto fight=GetFightTelemetry();
+    char speed[24];
+    if (fight.online) std::snprintf(speed,sizeof(speed),"%d/%d",fight.left_wpm,fight.right_wpm);
+    else std::snprintf(speed,sizeof(speed),"--/--");
+    MacintoshSetText(mac_wpm_,speed);
     MacintoshSetText(mac_transport_,std::strcmp(sample.transport,"OFFLINE")==0 ? "OFF" : sample.transport);
     char primary[12]="--%",weekly[12]="--%",line[64];
     if(sample.online && sample.metrics.left>=0) std::snprintf(primary,sizeof(primary),"%d%%",sample.metrics.left);

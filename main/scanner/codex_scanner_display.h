@@ -39,6 +39,7 @@ private:
     lv_obj_t* mac_tokens_ = nullptr;
     lv_obj_t* mac_clock_ = nullptr;
     lv_obj_t* mac_battery_ = nullptr;
+    lv_obj_t* mac_wpm_ = nullptr;
     int shown_mac_minute_ = -1;
     lv_obj_t* mac_modifier_keys_[4] = {};
     lv_obj_t* mac_modifier_symbols_[4] = {};
