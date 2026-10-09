@@ -24,6 +24,7 @@ jobs:
           /tmp/cube-format-env/bin/clang-format -i main/scanner/macintosh_theme.{cc,h} main/scanner/prospector_modifiers.h tests/prospector_modifiers_test.cc
           /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_theme.{cc,h} main/scanner/arcade_sprites.{cc,h} main/scanner/arcade_motion.h tests/arcade_motion_test.cc tests/arcade_assets_test.cc
           /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_text.{cc,h} main/scanner/arcade_lettering.h main/scanner/arcade_symbols.h main/scanner/arcade_controls.h tests/arcade_lettering_test.cc tests/arcade_controls_test.cc
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_activity.h tests/arcade_activity_test.cc
       - name: Compile and merge complete firmware
         uses: espressif/esp-idf-ci-action@v1
         with:

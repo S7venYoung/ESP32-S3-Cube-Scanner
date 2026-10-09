@@ -1,5 +1,6 @@
 #include "arcade_theme.h"
 #include "arcade_motion.h"
+#include "arcade_activity.h"
 #include "arcade_sprites.h"
 #include "arcade_text.h"
 #include "codex_metrics.h"
@@ -14,6 +15,8 @@ constexpr uint32_t ink = 0x101411, white = 0xF3EEE5, red = 0xFF442C, gold = 0xFF
 struct Scene {
     lv_obj_t *root, *quota[2], *health[2], *battery[2], *rage[2], *fighter[2], *effect[2];
     lv_obj_t *total, *transport, *cube, *cube_fill, *keys[4], *symbols[4];
+    lv_obj_t *versus, *today;
+    ArcadeActivity activity;
     lv_timer_t* timer = nullptr;
     ArcadeMotion motion[2];
     int shown_pose[2] = {-1,-1};
@@ -24,7 +27,22 @@ lv_obj_t* Box(lv_obj_t* p,int x,int y,int w,int h,uint32_t color,int radius=0) {
     lv_obj_set_style_radius(o,radius,0);lv_obj_remove_flag(o,LV_OBJ_FLAG_SCROLLABLE);lv_obj_remove_flag(o,LV_OBJ_FLAG_CLICKABLE);return o;
 }
 lv_obj_t* Text(lv_obj_t* p,const char* s,int x,int y,int w,uint32_t color,int size=16) {
-    return ArcadeText(p,s,x,y,w,color,size);
+    auto* group=lv_obj_create(p);lv_obj_remove_style_all(group);
+    lv_obj_set_pos(group,x,y);lv_obj_set_size(group,w,std::max(size,18));
+    lv_obj_remove_flag(group,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(group,LV_OBJ_FLAG_CLICKABLE);
+    // One-pixel overdraw gives the default system font a heavier stem.
+    for(int i=0;i<2;++i){
+        auto* label=lv_label_create(group);lv_obj_remove_style_all(label);
+        lv_obj_set_pos(label,i,0);lv_obj_set_width(label,w-1);
+        lv_obj_set_style_text_font(label,LV_FONT_DEFAULT,0);
+        lv_obj_set_style_text_color(label,lv_color_hex(color),0);
+        lv_label_set_long_mode(label,LV_LABEL_LONG_CLIP);lv_label_set_text(label,s);
+    }
+    return group;
+}
+void SetText(lv_obj_t* group,const char* value){
+    for(int i=0;i<2;++i)lv_label_set_text(lv_obj_get_child(group,i),value);
 }
 lv_obj_t* StatusLabel(lv_obj_t* parent,const char* text,int x,int width,uint32_t color) {
     auto* label=lv_label_create(parent);
@@ -47,6 +65,11 @@ void Tick(Scene& s) {
         return;
     }
     const auto f=GetFightTelemetry();
+    const bool hidden=s.activity.Step(lv_tick_get(),f.online,f.left_wpm,f.right_wpm);
+    for(auto* overlay:{s.versus,s.today,s.total}) {
+        if(hidden)lv_obj_add_flag(overlay,LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(overlay,LV_OBJ_FLAG_HIDDEN);
+    }
     const int speeds[]={f.left_wpm,f.right_wpm};
     for(int i=0;i<2;++i) {
         auto& m=s.motion[i];m.Step(lv_tick_get(),speeds[i],f.online);
@@ -86,8 +109,8 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
         s->health[i]=Box(frame,2,2,104,7,i==0?red:gold,2);
         lv_obj_set_style_bg_grad_color(s->health[i],lv_color_hex(i==0?gold:red),0);
         lv_obj_set_style_bg_grad_dir(s->health[i],LV_GRAD_DIR_HOR,0);
-        Text(s->root,i==0?"5H LEFT":"7D LEFT",i==0?9:166,40,i==0?46:39,white,12);
-        s->quota[i]=Text(s->root,"--%",i==0?85:211,40,25,gold,12);
+        Text(s->root,i==0?"5H LEFT":"7D LEFT",x+2,39,66,white,14);
+        s->quota[i]=Text(s->root,"--%",x+68,39,40,gold,14);
     }
     ArcadeDojoCreate(s->root);
     // Stage is a fixed opaque image, only fighters/effects animate above it.
@@ -104,14 +127,14 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
         lv_obj_set_style_shadow_color(s->effect[i],lv_color_hex(i==0?blue:red),0);
         lv_obj_set_style_shadow_width(s->effect[i],8,0);lv_obj_add_flag(s->effect[i],LV_OBJ_FLAG_HIDDEN);
     }
-    ArcadeArtworkCreate(s->root,1,91,75);
-    ArcadeArtworkCreate(s->root,2,41,140);
-    s->total=Text(s->root,"--",68,156,104,red,28);
+    s->versus=ArcadeArtworkCreate(s->root,1,91,75);
+    s->today=ArcadeArtworkCreate(s->root,2,41,140);
+    s->total=ArcadeText(s->root,"--",68,156,104,red,28);
     for(int i=0;i<2;++i) {
         const int x=i==0?6:126;
         s->rage[i]=ArcadeEnergy(s->root,x,177,108,25);
-        Text(s->root,i==0?"L BAT":"R BAT",x+10,178,34,white,12);
-        s->battery[i]=Text(s->root,"--%",x+45,178,43,blue,12);
+        Text(s->root,i==0?"L BAT":"R BAT",x+10,176,45,white,14);
+        s->battery[i]=Text(s->root,"--%",x+59,176,43,blue,14);
     }
     for(int i=0;i<4;++i) {
         s->keys[i]=Box(s->root,27+i*44,207,40,25,0x181818,4);
@@ -143,8 +166,8 @@ void ArcadeRefresh(lv_obj_t* root) {
     const int quota[]={c.online?c.metrics.left:-1,c.online?c.metrics.week_left:-1};
     const int battery[]={f.online?f.left_battery:-1,f.online?f.right_battery:-1};
     for(int i=0;i<2;++i){
-        if(quota[i]>=0)std::snprintf(text,sizeof(text),"%d%%",quota[i]);else std::snprintf(text,sizeof(text),"--%%");ArcadeTextSet(s.quota[i],text);Bar(s.health[i],quota[i],104);
-        if(battery[i]>=0)std::snprintf(text,sizeof(text),"%d%%",battery[i]);else std::snprintf(text,sizeof(text),"--%%");ArcadeTextSet(s.battery[i],text);ArcadeEnergySet(s.rage[i],battery[i]);
+        if(quota[i]>=0)std::snprintf(text,sizeof(text),"%d%%",quota[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.quota[i],text);Bar(s.health[i],quota[i],104);
+        if(battery[i]>=0)std::snprintf(text,sizeof(text),"%d%%",battery[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.battery[i],text);ArcadeEnergySet(s.rage[i],battery[i]);
     }
     if(!c.online || c.metrics.tokens<0)std::snprintf(text,sizeof(text),"--");
     else if(c.metrics.tokens>=1000000)std::snprintf(text,sizeof(text),"%.1fM",c.metrics.tokens/1000000.0);

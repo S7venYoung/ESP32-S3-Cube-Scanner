@@ -9,6 +9,8 @@ g++ -std=c++17 tests/arcade_lettering_test.cc -o /tmp/arcade-lettering-test
 /tmp/arcade-lettering-test
 g++ -std=c++17 tests/arcade_controls_test.cc -o /tmp/arcade-controls-test
 /tmp/arcade-controls-test
+g++ -std=c++17 tests/arcade_activity_test.cc -o /tmp/arcade-activity-test
+/tmp/arcade-activity-test
 g++ -std=c++17 tests/dashboard_command_test.cc -o /tmp/dashboard-command-test
 /tmp/dashboard-command-test
 g++ -std=c++17 tests/prospector_modifiers_test.cc -o /tmp/prospector-modifiers-test
