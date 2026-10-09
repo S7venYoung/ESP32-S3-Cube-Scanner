@@ -1,6 +1,11 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+inline unsigned ArcadeIdleFrame(uint32_t now,int side) {
+    // Asymmetric timing keeps the two guards from breathing in lockstep.
+    constexpr unsigned sequence[]={0,1,0,2};
+    return sequence[((now+(side?190:0))/260)%4];
+}
 
 // Visual cadence only; keyboard batteries are never consumed by attacks.
 struct ArcadeMotion {

@@ -5,6 +5,10 @@ g++ -std=c++17 tests/arcade_motion_test.cc -o /tmp/arcade-motion-test
 /tmp/arcade-motion-test
 g++ -std=c++17 tests/arcade_assets_test.cc -o /tmp/arcade-assets-test
 /tmp/arcade-assets-test
+g++ -std=c++17 tests/arcade_lettering_test.cc -o /tmp/arcade-lettering-test
+/tmp/arcade-lettering-test
+g++ -std=c++17 tests/arcade_controls_test.cc -o /tmp/arcade-controls-test
+/tmp/arcade-controls-test
 g++ -std=c++17 tests/dashboard_command_test.cc -o /tmp/dashboard-command-test
 /tmp/dashboard-command-test
 g++ -std=c++17 tests/prospector_modifiers_test.cc -o /tmp/prospector-modifiers-test

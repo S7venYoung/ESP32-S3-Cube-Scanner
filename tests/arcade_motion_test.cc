@@ -2,6 +2,12 @@
 #include <cassert>
 int main() {
     ArcadeMotion left, right;
+    assert(ArcadeIdleFrame(0,0)==0);
+    assert(ArcadeIdleFrame(260,0)==1);
+    assert(ArcadeIdleFrame(520,0)==0);
+    assert(ArcadeIdleFrame(780,0)==2);
+    assert(ArcadeIdleFrame(1040,0)==0);
+    assert(ArcadeIdleFrame(100,0)!=ArcadeIdleFrame(100,1));
     left.Reset(0); right.Reset(0);
     bool super=false, punch=false, kick=false, fireball=false, uppercut=false;
     for(uint32_t now=80;now<=16000;now+=80){

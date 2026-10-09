@@ -17,10 +17,16 @@ Short volume-down presses still reduce volume. In the Codex variant, its long
 press no longer mutes, and volume-up long press has no action (damaged button).
 Stock non-scanner firmware retains its original maximum-volume/mute actions.
 Arcade uses the two illustrated fighters from the approved mockup, not pixel art,
-and the same hand-drawn Codex text masks,
+and reference-derived lettering artwork rendered directly to alpha canvases,
 with the original mockup's dojo reconstructed behind them (warm lamps, wood
 pillars and the central 武 scroll). The fixed RGB565 stage is behind the alpha
-fighters; header/footer masks remain on solid dark panels for readability.
+fighters. TODAY TOKENS retains the reference's black/red brush banner, with live
+values above it. Header connection and local battery numbers use the default
+LVGL font; other Arcade text and smooth Mac symbols are drawn without fonts.
+The gold lower frame surrounds slanted blue battery segments. WPM rows are removed from
+Arcade; real left/right WPM still drives attacks internally. Every fighter has
+three idle guard keyframes (neutral, inhale, exhale), on an asymmetric loop even
+when no typing or no telemetry is present; no fake attacks or fake WPM values.
 Codex, Macintosh and Arcade have separate hidden/shown theme layers. Switching
 invalidates the full dashboard and inactive Codex widgets no longer refresh.
 This prevents software layer interference; physical panel retention still needs
