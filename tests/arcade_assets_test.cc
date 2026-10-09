@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstddef>
+#include "../main/scanner/arcade_assets/arcade_dojo.inc"
 #include "../main/scanner/arcade_assets/arcade_frame_0_0.inc"
 #include "../main/scanner/arcade_assets/arcade_frame_0_1.inc"
 #include "../main/scanner/arcade_assets/arcade_frame_0_2.inc"

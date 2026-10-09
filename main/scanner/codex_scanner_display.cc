@@ -114,7 +114,13 @@ void CodexScannerDisplay::SetupUI() {
         Panel(battery, 99, 11, 2, 4, kMuted, 0);
     }
 
-    // A temporary Siri-like surface floats above the unchanged dashboard.
+    // Put the original widgets in their own layer, not beneath every theme.
+    const auto codex_children = lv_obj_get_child_count(dashboard_);
+    codex_dashboard_ = Panel(dashboard_, 0, 0, width_, height_, kInk, 0);
+    for (uint32_t i = 0; i < codex_children; ++i) {
+        lv_obj_set_parent(lv_obj_get_child(dashboard_, 0), codex_dashboard_);
+    }
+    // Shared notices/voice remain outside theme layers.
     assistant_overlay_ = Outline(dashboard_, 8, 181, 224, 51, 0x49A5F0, 15);
     lv_obj_set_style_bg_opa(assistant_overlay_, LV_OPA_90, 0);
     assistant_orb_ = Outline(assistant_overlay_, 13, 9, 34, 34, 0x49A5F0, 17);
@@ -146,6 +152,7 @@ void CodexScannerDisplay::SetupUI() {
     dashboard_theme_ = dashboard_settings.GetString("dashboard", "codex");
     if (dashboard_theme_ != "macintosh" && dashboard_theme_ != "arcade") dashboard_theme_ = "codex";
     mac_theme_ = dashboard_theme_ == "macintosh";
+    if (dashboard_theme_ != "codex") lv_obj_add_flag(codex_dashboard_, LV_OBJ_FLAG_HIDDEN);
     if (!mac_theme_) lv_obj_add_flag(mac_dashboard_, LV_OBJ_FLAG_HIDDEN);
     if (arcade_dashboard_ && dashboard_theme_ != "arcade") lv_obj_add_flag(arcade_dashboard_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(assistant_overlay_);
@@ -235,6 +242,8 @@ void CodexScannerDisplay::SetDashboardTheme(const std::string& theme) {
     if (mac_dashboard_ == nullptr) return;
     if (dashboard_theme_ == theme || (theme == "arcade" && !arcade_dashboard_)) return;
     dashboard_theme_ = theme;
+    if (theme == "codex") lv_obj_remove_flag(codex_dashboard_, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(codex_dashboard_, LV_OBJ_FLAG_HIDDEN);
     mac_theme_ = theme == "macintosh";
     if (mac_theme_) lv_obj_remove_flag(mac_dashboard_,LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(mac_dashboard_,LV_OBJ_FLAG_HIDDEN);
@@ -244,8 +253,8 @@ void CodexScannerDisplay::SetDashboardTheme(const std::string& theme) {
     }
     Settings settings("cube_display",true);
     settings.SetString("dashboard",theme);
-    UpdateMacintosh();
-    ArcadeRefresh(arcade_dashboard_);
+    UpdateMetrics();
+    lv_obj_invalidate(dashboard_);
     lv_obj_move_foreground(assistant_overlay_);
     lv_obj_move_foreground(notice_panel_);
 }
@@ -296,6 +305,7 @@ void CodexScannerDisplay::UpdateMacintosh() {
 void CodexScannerDisplay::UpdateMetrics() {
     if (quota_text_ == nullptr) return;
     const auto sample = GetCodexSnapshot();
+    if (dashboard_theme_ == "codex") {
     CodexDrawSetText(scan_status_, sample.transport);
     lv_obj_set_style_bg_color(scan_dot_, lv_color_hex(sample.online ? kGreen : kMuted), 0);
     char text[32];
@@ -317,6 +327,7 @@ void CodexScannerDisplay::UpdateMetrics() {
     else if (sample.metrics.tokens >= 1000) std::snprintf(text, sizeof(text), "%.1fK", sample.metrics.tokens / 1000.0);
     else std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
     CodexDrawSetText(tokens_text_, text);
+    }
     UpdateMacintosh();
     ArcadeRefresh(arcade_dashboard_);
 }

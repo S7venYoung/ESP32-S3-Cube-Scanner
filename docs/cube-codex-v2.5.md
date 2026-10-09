@@ -14,7 +14,15 @@ appears as a temporary floating panel. Native setup and safety alerts remain.
 Long-press volume-up cycles Codex -> Macintosh -> Arcade -> Codex; the choice
 is saved across restart. Say "你好小智，切换街机主题" (or 格斗主题/街霸主题).
 Arcade uses the two illustrated fighters from the approved mockup, not pixel art,
-and the same hand-drawn Codex text masks. Each fighter has guard, punch, kick,
+and the same hand-drawn Codex text masks,
+with the original mockup's dojo reconstructed behind them (warm lamps, wood
+pillars and the central 武 scroll). The fixed RGB565 stage is behind the alpha
+fighters; header/footer masks remain on solid dark panels for readability.
+Codex, Macintosh and Arcade have separate hidden/shown theme layers. Switching
+invalidates the full dashboard and inactive Codex widgets no longer refresh.
+This prevents software layer interference; physical panel retention still needs
+hardware diagnosis if ghosts persist after restart/pure-color testing.
+Each fighter has guard, punch, kick,
 Hadouken, Shoryuken and super-attack poses, with energy effects and recovery.
 Left/right WPM independently drives attack cadence. At 70+ WPM sustained for
 four seconds, the next attack becomes a super. These are dashboard animations,

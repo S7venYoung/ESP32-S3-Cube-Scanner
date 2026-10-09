@@ -2,6 +2,7 @@
 #include <esp_heap_caps.h>
 #include <algorithm>
 #include <cstdint>
+#include "arcade_assets/arcade_dojo.inc"
 #include "arcade_assets/arcade_frame_0_0.inc"
 #include "arcade_assets/arcade_frame_0_1.inc"
 #include "arcade_assets/arcade_frame_0_2.inc"
@@ -15,11 +16,32 @@
 #include "arcade_assets/arcade_frame_1_4.inc"
 #include "arcade_assets/arcade_frame_1_5.inc"
 namespace {
+const lv_image_dsc_t* DojoImage() {
+    static const lv_image_dsc_t image = [] {
+        lv_image_dsc_t d{};
+        d.header.magic = LV_IMAGE_HEADER_MAGIC;
+        d.header.cf = LV_COLOR_FORMAT_RGB565;
+        d.header.w = 236;
+        d.header.h = 104;
+        d.header.stride = 236 * 2;
+        d.data_size = sizeof(dojo_pixels);
+        d.data = dojo_pixels;
+        return d;
+    }();
+    return &image;
+}
 struct Frame {const uint32_t* palette;const uint8_t* runs;size_t length;};
 #define FRAME(s,p) {arcade_frame_##s##_##p##_palette,arcade_frame_##s##_##p##_runs,sizeof(arcade_frame_##s##_##p##_runs)}
 constexpr Frame frames[2][6]={{FRAME(0,0),FRAME(0,1),FRAME(0,2),FRAME(0,3),FRAME(0,4),FRAME(0,5)},
                             {FRAME(1,0),FRAME(1,1),FRAME(1,2),FRAME(1,3),FRAME(1,4),FRAME(1,5)}};
 #undef FRAME
+}
+lv_obj_t* ArcadeDojoCreate(lv_obj_t* parent) {
+    auto* image=lv_image_create(parent);
+    lv_image_set_src(image,DojoImage());
+    lv_obj_set_pos(image,2,76);
+    lv_obj_remove_flag(image,LV_OBJ_FLAG_CLICKABLE);
+    return image;
 }
 lv_obj_t* ArcadeSpriteCreate(lv_obj_t* parent) {
     auto* pixels=static_cast<uint8_t*>(heap_caps_calloc(96*104,4,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));

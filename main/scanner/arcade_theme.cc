@@ -67,7 +67,8 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
         s->quota[i]=Text(s->root,"--%",x+64,39,44,gold);
         s->wpm[i]=Text(s->root,i==0?"L --":"R --",x,58,108,white);
     }
-    // Fixed dark stage rules: no full-screen flashing, no per-frame allocation.
+    ArcadeDojoCreate(s->root);
+    // Stage is a fixed opaque image, only fighters/effects animate above it.
     Box(s->root,8,177,224,2,0x48554F);Box(s->root,16,173,208,1,0x26362F);
     Text(s->root,"VS",101,93,38,red,20);
     for(int i=0;i<2;++i) {
