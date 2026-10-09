@@ -11,7 +11,7 @@ namespace {
 struct Drawing {std::string text;uint8_t* pixels;int width,height,stride;uint32_t color;};
 void Render(lv_obj_t* object,Drawing& d) {
     if(!d.text.empty() && d.text[0]=='$')
-        ArcadeControls::Energy(d.pixels,d.width,d.height,d.stride,std::atoi(d.text.c_str()+1));
+        ArcadeControls::Energy(d.pixels,d.width,d.height,d.stride,std::atoi(d.text.c_str()+1),d.text.find('R')!=std::string::npos);
     else ArcadeLettering::Paint(d.pixels,d.width,d.height,d.stride,d.text.c_str(),d.color);
     lv_obj_invalidate(object);
 }
@@ -41,7 +41,7 @@ void ArcadeTextColor(lv_obj_t* obj,uint32_t color){
 lv_obj_t* ArcadeEnergy(lv_obj_t* parent,int x,int y,int width,int height) {
     return ArcadeText(parent,"$-1",x,y,width,0,height);
 }
-void ArcadeEnergySet(lv_obj_t* object,int percent) {
-    char value[12];std::snprintf(value,sizeof(value),"$%d",std::clamp(percent,-1,100));
+void ArcadeEnergySet(lv_obj_t* object,int percent,bool right_aligned) {
+    char value[12];std::snprintf(value,sizeof(value),"$%d%c",std::clamp(percent,-1,100),right_aligned?'R':'L');
     ArcadeTextSet(object,value);
 }

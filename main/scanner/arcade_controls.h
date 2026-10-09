@@ -55,11 +55,11 @@ inline void Modifier(uint8_t* p,int w,int h,int stride,char symbol,uint32_t rgb)
         if(coverage)Pixel(p,stride,x,y,rgb,coverage*255/4);
     }
 }
-// Reference layout: outlined upper label panel and inset slanted blue cells.
-inline void Energy(uint8_t* p,int w,int h,int stride,int percent) {
+// Text-free gauge: thicker blue cells inside a full-height gold bevel.
+inline void Energy(uint8_t* p,int w,int h,int stride,int percent,bool right_aligned=false) {
     std::memset(p,0,size_t(stride)*h);percent=std::clamp(percent,-1,100);
-    const Point outer[]={{7,1},{100,1},{107,10},{103,17},{98,24},{7,24},{1,12}};
-    const Point track[]={{7,12},{100,12},{104,17},{99,23},{7,23},{3,17}};
+    const Point outer[]={{7,1},{100,1},{107,12},{100,24},{7,24},{1,12}};
+    const Point track[]={{8,3},{99,3},{104,12},{98,22},{8,22},{3,12}};
     for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
         unsigned count=0,rr=0,gg=0,bb=0;
         for(float sy:{.25f,.75f})for(float sx:{.25f,.75f}) {
@@ -69,11 +69,15 @@ inline void Energy(uint8_t* p,int w,int h,int stride,int percent) {
             if(Outline(px,py,outer)<.45f)color=py<12?0xE4C591:0xBF8F49;
             if(Inside(px,py,track)) {
                 color=0x16212B;
-                const float u=px-7+(py-13)*.38f;
+                const float u=px-7+(py-5)*.38f;
                 const int cell=int(u/9.25f);
-                if(py>14 && py<21 && cell>=0 && cell<10 && std::fmod(u,9.25f)>1.1f) {
-                    color=percent>=0 && cell*10<percent ? (py<17?0x31DDF8:0x009FE0):0x29343E;
+                if(percent>=0 && py>5 && py<20 && cell>=0 && cell<10 && std::fmod(u,9.25f)>1.1f) {
+                    const int fill_cell=right_aligned?9-cell:cell;
+                    const uint32_t full=percent<=20?(py<12?0xFFC568:0xE77820):(py<12?0x31DDF8:0x009FE0);
+                    color=fill_cell*10<percent ? full:0x29343E;
                 }
+                // Unknown data uses a neutral dash, never a fake empty battery.
+                if(percent<0 && px>44 && px<64 && py>11 && py<14)color=0x7F929E;
             }
             if(Outline(px,py,track)<.45f)color=0xECC56F;
             ++count;rr+=(color>>16)&255;gg+=(color>>8)&255;bb+=color&255;

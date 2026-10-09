@@ -13,7 +13,7 @@
 namespace {
 constexpr uint32_t ink = 0x101411, white = 0xF3EEE5, red = 0xFF442C, gold = 0xFFBF18, blue = 0x21CEEE;
 struct Scene {
-    lv_obj_t *root, *quota[2], *health[2], *battery[2], *rage[2], *fighter[2], *effect[2];
+    lv_obj_t *root, *quota[2], *health[2], *rage[2], *fighter[2], *effect[2];
     lv_obj_t *total, *transport, *cube, *cube_fill, *keys[4], *symbols[4];
     lv_obj_t *versus, *today;
     ArcadeActivity activity;
@@ -55,9 +55,14 @@ lv_obj_t* StatusLabel(lv_obj_t* parent,const char* text,int x,int width,uint32_t
     lv_label_set_text(label,text);
     return label;
 }
-void Bar(lv_obj_t* bar,int value,int width) {
+void Bar(lv_obj_t* bar,int value,int width,bool right_aligned=false) {
     if(value<0 || value==0) lv_obj_add_flag(bar,LV_OBJ_FLAG_HIDDEN);
-    else {lv_obj_set_width(bar,std::max(1,width*std::clamp(value,0,100)/100));lv_obj_remove_flag(bar,LV_OBJ_FLAG_HIDDEN);}
+    else {
+        const int filled=std::max(1,width*std::clamp(value,0,100)/100);
+        lv_obj_set_width(bar,filled);
+        if(right_aligned)lv_obj_set_x(bar,2+width-filled);
+        lv_obj_remove_flag(bar,LV_OBJ_FLAG_HIDDEN);
+    }
 }
 void Tick(Scene& s) {
     if(lv_obj_has_flag(s.root,LV_OBJ_FLAG_HIDDEN)) {
@@ -132,9 +137,7 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
     s->total=ArcadeText(s->root,"--",68,156,104,red,28);
     for(int i=0;i<2;++i) {
         const int x=i==0?6:126;
-        s->rage[i]=ArcadeEnergy(s->root,x,177,108,25);
-        Text(s->root,i==0?"L BAT":"R BAT",x+10,176,45,white,14);
-        s->battery[i]=Text(s->root,"--%",x+59,176,43,blue,14);
+        s->rage[i]=ArcadeEnergy(s->root,x,184,108,18);
     }
     for(int i=0;i<4;++i) {
         s->keys[i]=Box(s->root,27+i*44,207,40,25,0x181818,4);
@@ -166,8 +169,8 @@ void ArcadeRefresh(lv_obj_t* root) {
     const int quota[]={c.online?c.metrics.left:-1,c.online?c.metrics.week_left:-1};
     const int battery[]={f.online?f.left_battery:-1,f.online?f.right_battery:-1};
     for(int i=0;i<2;++i){
-        if(quota[i]>=0)std::snprintf(text,sizeof(text),"%d%%",quota[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.quota[i],text);Bar(s.health[i],quota[i],104);
-        if(battery[i]>=0)std::snprintf(text,sizeof(text),"%d%%",battery[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.battery[i],text);ArcadeEnergySet(s.rage[i],battery[i]);
+        if(quota[i]>=0)std::snprintf(text,sizeof(text),"%d%%",quota[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.quota[i],text);Bar(s.health[i],quota[i],104,i==1);
+        ArcadeEnergySet(s.rage[i],battery[i],i==1);
     }
     if(!c.online || c.metrics.tokens<0)std::snprintf(text,sizeof(text),"--");
     else if(c.metrics.tokens>=1000000)std::snprintf(text,sizeof(text),"%.1fM",c.metrics.tokens/1000000.0);

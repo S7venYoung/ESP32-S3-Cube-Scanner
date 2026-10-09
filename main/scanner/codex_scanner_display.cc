@@ -149,8 +149,11 @@ void CodexScannerDisplay::SetupUI() {
     SetupMacintosh();
     arcade_dashboard_ = ArcadeCreate(dashboard_);
     Settings dashboard_settings("cube_display");
-    dashboard_theme_ = dashboard_settings.GetString("dashboard", "codex");
-    if (dashboard_theme_ != "macintosh" && dashboard_theme_ != "arcade") dashboard_theme_ = "codex";
+    dashboard_theme_ = dashboard_settings.GetString("dashboard", "arcade");
+    if (dashboard_theme_ != "codex" && dashboard_theme_ != "macintosh" && dashboard_theme_ != "arcade")
+        dashboard_theme_ = "arcade";
+    // Keep a usable screen if optional Arcade allocation fails.
+    if (dashboard_theme_ == "arcade" && !arcade_dashboard_) dashboard_theme_ = "codex";
     mac_theme_ = dashboard_theme_ == "macintosh";
     if (dashboard_theme_ != "codex") lv_obj_add_flag(codex_dashboard_, LV_OBJ_FLAG_HIDDEN);
     if (!mac_theme_) lv_obj_add_flag(mac_dashboard_, LV_OBJ_FLAG_HIDDEN);
