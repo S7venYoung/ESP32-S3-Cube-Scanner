@@ -11,8 +11,11 @@ Native battery (ADC1 channel7, charging GPIO9), power hold GPIO2, audio and
 three buttons retain the official hardware implementation. Voice activity
 appears as a temporary floating panel. Native setup and safety alerts remain.
 
-Long-press volume-up cycles Codex -> Macintosh -> Arcade -> Codex; the choice
+Long-press volume-down cycles Codex -> Macintosh -> Arcade -> Codex; the choice
 is saved across restart. Say "你好小智，切换街机主题" (or 格斗主题/街霸主题).
+Short volume-down presses still reduce volume. In the Codex variant, its long
+press no longer mutes, and volume-up long press has no action (damaged button).
+Stock non-scanner firmware retains its original maximum-volume/mute actions.
 Arcade uses the two illustrated fighters from the approved mockup, not pixel art,
 and the same hand-drawn Codex text masks,
 with the original mockup's dojo reconstructed behind them (warm lamps, wood
@@ -59,7 +62,7 @@ buttons and reconnect on the physical unit after flashing.
 
 默认仍为 Codex。说“你好小智”唤醒，然后说“切换迈克主题”或“切换麦金塔主题”；说“切换 Codex 主题”返回。选项保存，重启后保留。
 
-长按音量加键循环切换 Codex / 麦金塔主题；短按加减音量不变。Codex 变体不再使用长按音量加键设置最大音量；音量减键原有操作保持不变。
+长按音量减键循环切换 Codex / 麦金塔 / 街机主题；短按加减音量不变。Codex 变体长按音量减不再静音，长按音量加不执行操作；原版非扫描仪固件保持最大音量 / 静音操作。
 
 麦金塔页面以像素绘制文字和复古窗口，保留 USB / Wi-Fi、Cube 自身电量、5 小时 / 7 天剩余额度与今日用量。键盘层、WPM、左右键盘电量尚无真实数据源，显示 `--`；不显示示例数值。小智唤醒时仍悬浮在主题上。
 

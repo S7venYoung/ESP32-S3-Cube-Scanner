@@ -134,9 +134,7 @@ private:
 
         volume_up_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
-#if CONFIG_ZMK_SCANNER_MODE
-            Application::GetInstance().Schedule([this]() { display_->NextDashboardTheme(); });
-#else
+#if !CONFIG_ZMK_SCANNER_MODE
             GetAudioCodec()->SetOutputVolume(100);
             GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
 #endif
@@ -155,8 +153,12 @@ private:
 
         volume_down_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
+#if CONFIG_ZMK_SCANNER_MODE
+            Application::GetInstance().Schedule([this]() { display_->NextDashboardTheme(); });
+#else
             GetAudioCodec()->SetOutputVolume(0);
             GetDisplay()->ShowNotification(Lang::Strings::MUTED);
+#endif
         });
     }
 
