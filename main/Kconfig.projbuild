@@ -2,7 +2,7 @@ menu "Xiaozhi Assistant"
 
 config ZMK_SCANNER_MODE
     bool "Codex dashboard and companion sync"
-    depends on BOARD_TYPE_ZHENGCHEN_1_54TFT_WIFI
+    depends on BOARD_TYPE_ZHENGCHEN_1_54TFT_WIFI || BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
     default n
 
 config ZMK_SCANNER_NAME_FILTER

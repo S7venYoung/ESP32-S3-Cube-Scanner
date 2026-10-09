@@ -9,7 +9,7 @@
 
 class PowerManager {
 private:
-    esp_timer_handle_t timer_handle_;
+    esp_timer_handle_t timer_handle_ = nullptr;
     std::function<void(bool)> on_charging_status_changed_;
     std::function<void(bool)> on_low_battery_status_changed_;
 
@@ -23,7 +23,7 @@ private:
     const int kBatteryAdcDataCount = 3;
     const int kLowBatteryLevel = 20;
 
-    adc_oneshot_unit_handle_t adc_handle_;
+    adc_oneshot_unit_handle_t adc_handle_ = nullptr;
 
     void CheckBatteryStatus() {
         // Get charging status
@@ -52,7 +52,11 @@ private:
 
     void ReadBatteryAdcData() {
         int adc_value;
-        ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, ADC_CHANNEL_6, &adc_value));
+        const auto error=adc_oneshot_read(adc_handle_, ADC_CHANNEL_6, &adc_value);
+        if(error!=ESP_OK){
+            ESP_LOGW("PowerManager","Battery ADC temporarily unavailable: %s",esp_err_to_name(error));
+            return;
+        }
         
         // 将 ADC 值添加到队列中
         adc_values_.push_back(adc_value);
@@ -133,7 +137,6 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1000000));
 
         // 初始化 ADC
         adc_oneshot_unit_init_cfg_t init_config = {
@@ -147,6 +150,7 @@ public:
             .bitwidth = ADC_BITWIDTH_12,
         };
         ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle_, ADC_CHANNEL_6, &chan_config));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1000000));
     }
 
     ~PowerManager() {
@@ -159,6 +163,7 @@ public:
         }
     }
 
+    bool HasBatteryLevel() const {return adc_values_.size()>=kBatteryAdcDataCount;}
     bool IsCharging() {
         // 如果电量已经满了，则不再显示充电中
         if (battery_level_ == 100) {

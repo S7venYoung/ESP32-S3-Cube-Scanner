@@ -9,6 +9,14 @@
 #include "led/single_led.h"
 #include "assets/lang_config.h"
 #include "power_manager.h"
+#if CONFIG_ZMK_SCANNER_MODE
+#include "scanner/codex_scanner_display.h"
+#include "scanner/zmk_scanner.h"
+void StartCodexSync();
+using BoardDisplay = CodexScannerDisplay;
+#else
+using BoardDisplay = SpiLcdDisplay;
+#endif
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -23,9 +31,9 @@ private:
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
-    SpiLcdDisplay* display_;
-    PowerSaveTimer* power_save_timer_;
-    PowerManager* power_manager_;
+    BoardDisplay* display_ = nullptr;
+    PowerSaveTimer* power_save_timer_ = nullptr;
+    PowerManager* power_manager_ = nullptr;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
 
@@ -45,7 +53,11 @@ private:
         rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
         rtc_gpio_set_level(GPIO_NUM_21, 1);
 
+#if CONFIG_ZMK_SCANNER_MODE
+        power_save_timer_ = new PowerSaveTimer(-1, -1, -1);
+#else
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+#endif
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
             GetBacklight()->SetBrightness(1);
@@ -84,7 +96,15 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
-            app.ToggleChatState();
+            app.Schedule([](){Application::GetInstance().ToggleChatState();});
+        });
+
+        boot_button_.OnLongPress([this](){
+            power_save_timer_->WakeUp();
+            Application::GetInstance().Schedule([this](){
+                Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
+                EnterWifiConfigMode();
+            });
         });
 
         volume_up_button_.OnClick([this]() {
@@ -100,8 +120,10 @@ private:
 
         volume_up_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
+#if !CONFIG_ZMK_SCANNER_MODE
             GetAudioCodec()->SetOutputVolume(100);
             GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+#endif
         });
 
         volume_down_button_.OnClick([this]() {
@@ -117,8 +139,12 @@ private:
 
         volume_down_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
+#if CONFIG_ZMK_SCANNER_MODE
+            Application::GetInstance().Schedule([this](){display_->NextDashboardTheme();});
+#else
             GetAudioCodec()->SetOutputVolume(0);
             GetDisplay()->ShowNotification(Lang::Strings::MUTED);
+#endif
         });
     }
 
@@ -146,20 +172,38 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
 
-        display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+        display_ = new BoardDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
 public:
+#if CONFIG_ZMK_SCANNER_MODE
+    void StartNetwork() override {
+        StartCodexSync();
+        WifiBoard::StartNetwork();
+    }
+    void SetNetworkEventCallback(NetworkEventCallback callback) override {
+        WifiBoard::SetNetworkEventCallback([callback](NetworkEvent event,const std::string& data){
+            if(callback)callback(event,data);
+            if(event==NetworkEvent::Connected)Application::GetInstance().Schedule([](){
+                static bool started=false;
+                if(!started){started=true;StartZmkScanner();}
+            });
+        });
+    }
+#endif
     XINGZHI_CUBE_1_54TFT_WIFI() :
         boot_button_(BOOT_BUTTON_GPIO),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
-        InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeSpi();
         InitializeButtons();
         InitializeSt7789Display();
+        InitializePowerManager();
+#if CONFIG_ZMK_SCANNER_MODE
+        display_->RegisterDashboardTools();
+#endif
         GetBacklight()->RestoreBrightness();
     }
 
@@ -179,6 +223,7 @@ public:
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        if(!power_manager_->HasBatteryLevel())return false;
         static bool last_discharging = false;
         charging = power_manager_->IsCharging();
         discharging = power_manager_->IsDischarging();

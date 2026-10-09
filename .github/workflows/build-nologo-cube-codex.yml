@@ -1,0 +1,54 @@
+name: Build Nologo Xingzhi Cube Codex v2.5
+on:
+  push:
+    branches: [codex/nologo-xingzhi-cube-154]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nologo-cube-firmware
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned v2.5 source (first migration only)
+        run: bash .migration-v25/source/scripts/prepare-cube-v25.sh
+      - name: Format touched integration files
+        run: |
+          python3 -m venv /tmp/cube-format-env
+          /tmp/cube-format-env/bin/pip install clang-format==21.1.8
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/codex_draw.{cc,h} main/scanner/codex_scanner_display.{cc,h} main/scanner/codex_sync.cc main/scanner/zmk_scanner.{cc,h} main/boards/zhengchen/1.54tft-wifi/zhengchen-1.54tft-wifi.cc main/boards/zhengchen/1.54tft-wifi/power_manager.h
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/macintosh_theme.{cc,h} main/scanner/prospector_modifiers.h tests/prospector_modifiers_test.cc
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_theme.{cc,h} main/scanner/arcade_sprites.{cc,h} main/scanner/arcade_motion.h tests/arcade_motion_test.cc tests/arcade_assets_test.cc
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_text.{cc,h} main/scanner/arcade_lettering.h main/scanner/arcade_symbols.h main/scanner/arcade_controls.h tests/arcade_lettering_test.cc tests/arcade_controls_test.cc
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_activity.h tests/arcade_activity_test.cc
+          /tmp/cube-format-env/bin/clang-format -i main/boards/nologo/xingzhi-cube-1.54tft-wifi/xingzhi-cube-1.54tft-wifi.cc main/boards/nologo/xingzhi-cube-1.54tft-wifi/power_manager.h
+      - name: Compile and merge complete firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          path: .
+          command: bash scripts/build-nologo-cube-v25.sh
+      - name: Upload verified firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nologo-Xingzhi-154-Codex-v2.5.0-firmware
+          path: |
+            build/merged-binary.bin
+            build/xingzhi_cube_154_wifi_codex.bin
+            build/xiaozhi.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            build/generated_assets.bin
+            build/flash_args
+            build/flasher_args.json
+            build/sdkconfig
+            build/SHA256SUMS
+            build/FLASHING.md
+          if-no-files-found: error
+          retention-days: 30
