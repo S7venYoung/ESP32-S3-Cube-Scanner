@@ -22,6 +22,7 @@ jobs:
           /tmp/cube-format-env/bin/pip install clang-format==21.1.8
           /tmp/cube-format-env/bin/clang-format -i main/scanner/codex_draw.{cc,h} main/scanner/codex_scanner_display.{cc,h} main/scanner/codex_sync.cc main/scanner/zmk_scanner.{cc,h} main/boards/zhengchen/1.54tft-wifi/zhengchen-1.54tft-wifi.cc main/boards/zhengchen/1.54tft-wifi/power_manager.h
           /tmp/cube-format-env/bin/clang-format -i main/scanner/macintosh_theme.{cc,h} main/scanner/prospector_modifiers.h tests/prospector_modifiers_test.cc
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/arcade_theme.{cc,h} main/scanner/arcade_sprites.{cc,h} main/scanner/arcade_motion.h tests/arcade_motion_test.cc tests/arcade_assets_test.cc
       - name: Compile and merge complete firmware
         uses: espressif/esp-idf-ci-action@v1
         with:

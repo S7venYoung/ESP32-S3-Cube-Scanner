@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 python -m unittest discover -s scripts/tests -q
+g++ -std=c++17 tests/arcade_motion_test.cc -o /tmp/arcade-motion-test
+/tmp/arcade-motion-test
+g++ -std=c++17 tests/arcade_assets_test.cc -o /tmp/arcade-assets-test
+/tmp/arcade-assets-test
 g++ -std=c++17 tests/dashboard_command_test.cc -o /tmp/dashboard-command-test
 /tmp/dashboard-command-test
 g++ -std=c++17 tests/prospector_modifiers_test.cc -o /tmp/prospector-modifiers-test

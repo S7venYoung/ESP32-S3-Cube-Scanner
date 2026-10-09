@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <string>
 
-enum class DashboardVoiceCommand { None, Codex, Macintosh };
+enum class DashboardVoiceCommand { None, Codex, Macintosh, Arcade };
 inline DashboardVoiceCommand DashboardVoiceIntent(std::string text) {
     for (const auto* token : {" ", "\t", "\n", ",", ".", "!", "?", "，", "。", "！", "？"}) {
         size_t at;
@@ -18,6 +18,7 @@ inline DashboardVoiceCommand DashboardVoiceIntent(std::string text) {
         if (name == "迈克主题" || name == "麦金塔主题" || name == "麦金塔" ||
             name == "mac主题" || name == "macintosh主题") return DashboardVoiceCommand::Macintosh;
         if (name == "codex主题" || name == "codex") return DashboardVoiceCommand::Codex;
+        if (name == "街机主题" || name == "街机" || name == "格斗主题" || name == "街霸主题" || name == "arcade主题") return DashboardVoiceCommand::Arcade;
     }
     return DashboardVoiceCommand::None;
 }

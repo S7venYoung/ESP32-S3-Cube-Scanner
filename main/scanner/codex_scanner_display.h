@@ -33,6 +33,8 @@ private:
     void SetupMacintosh();
     void UpdateMacintosh();
     bool mac_theme_ = false;
+    std::string dashboard_theme_ = "codex";
+    lv_obj_t* arcade_dashboard_ = nullptr;
     lv_obj_t* mac_dashboard_ = nullptr;
     lv_obj_t* mac_transport_ = nullptr;
     lv_obj_t* mac_quota_ = nullptr;

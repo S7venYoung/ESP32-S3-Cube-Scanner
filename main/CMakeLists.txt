@@ -92,7 +92,7 @@ set(EMOTE_RESOLUTION "320_240")
 # Select the board source directory from Kconfig
 # Set default assets if the board uses partition table V2
 if(CONFIG_ZMK_SCANNER_MODE)
-    list(APPEND SOURCES "scanner/codex_draw.cc" "scanner/macintosh_theme.cc" "scanner/codex_scanner_display.cc"
+    list(APPEND SOURCES "scanner/codex_draw.cc" "scanner/macintosh_theme.cc" "scanner/arcade_theme.cc" "scanner/arcade_sprites.cc" "scanner/codex_scanner_display.cc"
                         "scanner/codex_sync.cc" "scanner/zmk_scanner.cc")
 endif()
 if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)

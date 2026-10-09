@@ -5,6 +5,7 @@
 #include "codex_metrics.h"
 #include "codex_draw.h"
 #include "macintosh_theme.h"
+#include "arcade_theme.h"
 #include "dashboard_command.h"
 #include "zmk_scanner.h"
 #include "settings.h"
@@ -140,9 +141,13 @@ void CodexScannerDisplay::SetupUI() {
     Impact(high_temp_popup_, "CPU HOT", 12, 12, 200, kPaper, 20, true);
     lv_obj_add_flag(high_temp_popup_, LV_OBJ_FLAG_HIDDEN);
     SetupMacintosh();
+    arcade_dashboard_ = ArcadeCreate(dashboard_);
     Settings dashboard_settings("cube_display");
-    mac_theme_ = dashboard_settings.GetString("dashboard", "codex") == "macintosh";
+    dashboard_theme_ = dashboard_settings.GetString("dashboard", "codex");
+    if (dashboard_theme_ != "macintosh" && dashboard_theme_ != "arcade") dashboard_theme_ = "codex";
+    mac_theme_ = dashboard_theme_ == "macintosh";
     if (!mac_theme_) lv_obj_add_flag(mac_dashboard_, LV_OBJ_FLAG_HIDDEN);
+    if (arcade_dashboard_ && dashboard_theme_ != "arcade") lv_obj_add_flag(arcade_dashboard_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(assistant_overlay_);
     lv_obj_move_foreground(notice_panel_);
     UpdateAssistantOverlay();
@@ -151,11 +156,11 @@ void CodexScannerDisplay::SetupUI() {
 
 void CodexScannerDisplay::RegisterDashboardTools() {
     McpServer::GetInstance().AddTool("self.screen.set_dashboard_theme",
-        "Switch Cube dashboard. theme=macintosh for Macintosh, Mac, 迈克主题 or 麦金塔主题; theme=codex for Codex主题. Preserve Xiaozhi voice and quota sync.",
+        "Switch Cube dashboard. theme=arcade for 街机主题/格斗主题; theme=macintosh for 迈克主题/麦金塔主题; theme=codex for Codex主题. Preserve Xiaozhi voice and quota sync.",
         PropertyList({Property("theme", kPropertyTypeString)}),
         [this](const PropertyList& properties) -> ReturnValue {
             const auto theme = properties["theme"].value<std::string>();
-            if (theme != "codex" && theme != "macintosh") return false;
+            if (theme != "codex" && theme != "macintosh" && theme != "arcade") return false;
             Application::GetInstance().Schedule([this, theme]() { SetDashboardTheme(theme); });
             return true;
         });
@@ -225,27 +230,34 @@ void CodexScannerDisplay::SetupMacintosh() {
 }
 
 void CodexScannerDisplay::SetDashboardTheme(const std::string& theme) {
-    if (theme != "codex" && theme != "macintosh") return;
+    if (theme != "codex" && theme != "macintosh" && theme != "arcade") return;
     DisplayLockGuard lock(this);
     if (mac_dashboard_ == nullptr) return;
-    if (mac_theme_ == (theme == "macintosh")) return;
+    if (dashboard_theme_ == theme || (theme == "arcade" && !arcade_dashboard_)) return;
+    dashboard_theme_ = theme;
     mac_theme_ = theme == "macintosh";
     if (mac_theme_) lv_obj_remove_flag(mac_dashboard_,LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(mac_dashboard_,LV_OBJ_FLAG_HIDDEN);
+    if (arcade_dashboard_) {
+        if (theme == "arcade") lv_obj_remove_flag(arcade_dashboard_,LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(arcade_dashboard_,LV_OBJ_FLAG_HIDDEN);
+    }
     Settings settings("cube_display",true);
     settings.SetString("dashboard",theme);
     UpdateMacintosh();
+    ArcadeRefresh(arcade_dashboard_);
     lv_obj_move_foreground(assistant_overlay_);
     lv_obj_move_foreground(notice_panel_);
 }
 
 void CodexScannerDisplay::NextDashboardTheme() {
     // Called on the application queue, like voice and MCP theme changes.
-    SetDashboardTheme(mac_theme_ ? "codex" : "macintosh");
+    SetDashboardTheme(dashboard_theme_ == "codex" ? "macintosh" : dashboard_theme_ == "macintosh" ? "arcade" : "codex");
 }
 
 void CodexScannerDisplay::SetMacModifierState(uint8_t modifiers) {
     DisplayLockGuard lock(this);
+    ArcadeSetModifiers(arcade_dashboard_, modifiers);
     for (int i=0;i<4;++i) {
         if (!mac_modifier_keys_[i]) continue;
         const bool pressed=(modifiers & (1u<<i))!=0;
@@ -306,6 +318,7 @@ void CodexScannerDisplay::UpdateMetrics() {
     else std::snprintf(text, sizeof(text), "%lld", static_cast<long long>(sample.metrics.tokens));
     CodexDrawSetText(tokens_text_, text);
     UpdateMacintosh();
+    ArcadeRefresh(arcade_dashboard_);
 }
 
 void CodexScannerDisplay::UpdateAssistantOverlay() {
@@ -361,7 +374,7 @@ void CodexScannerDisplay::SetChatMessage(const char* role, const char* content) 
     if (role != nullptr && content != nullptr && std::strcmp(role,"user")==0) {
         const auto intent=DashboardVoiceIntent(content);
         if(intent!=DashboardVoiceCommand::None) {
-            const std::string theme=intent==DashboardVoiceCommand::Macintosh?"macintosh":"codex";
+            const std::string theme=intent==DashboardVoiceCommand::Macintosh?"macintosh":intent==DashboardVoiceCommand::Arcade?"arcade":"codex";
             Application::GetInstance().Schedule([this,theme]() { SetDashboardTheme(theme); });
         }
         return;
@@ -412,6 +425,7 @@ void CodexScannerDisplay::UpdateStatusBar(bool update_all) {
         else std::snprintf(text, sizeof(text), "--%%");
         CodexDrawSetText(battery_text_, text);
         MacintoshSetText(mac_battery_,text);
+        ArcadeSetBattery(arcade_dashboard_,text);
         if (battery_level <= 0) {
             lv_obj_add_flag(cube_battery_fill_, LV_OBJ_FLAG_HIDDEN);
         } else {

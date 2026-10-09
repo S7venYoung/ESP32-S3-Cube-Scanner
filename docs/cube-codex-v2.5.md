@@ -11,9 +11,21 @@ Native battery (ADC1 channel7, charging GPIO9), power hold GPIO2, audio and
 three buttons retain the official hardware implementation. Voice activity
 appears as a temporary floating panel. Native setup and safety alerts remain.
 
+Long-press volume-up cycles Codex -> Macintosh -> Arcade -> Codex; the choice
+is saved across restart. Say "你好小智，切换街机主题" (or 格斗主题/街霸主题).
+Arcade uses the two illustrated fighters from the approved mockup, not pixel art,
+and the same hand-drawn Codex text masks. Each fighter has guard, punch, kick,
+Hadouken, Shoryuken and super-attack poses, with energy effects and recovery.
+Left/right WPM independently drives attack cadence. At 70+ WPM sustained for
+four seconds, the next attack becomes a super. These are dashboard animations,
+not a playable fighting engine. The blue lower bars always mean keyboard battery,
+not consumable attack energy. Missing battery or quota values remain --.
+
 Optional BLE discovers advertising names/RSSI and reads modifier flags from
-the original Prospector 26-byte manufacturer advertisement. It does not yet
-display ZMK layer, WPM or split battery telemetry. It starts after Wi-Fi connects and
+the original Prospector 26-byte manufacturer advertisement. Independent left/right
+WPM and split batteries require the additional CUBE-FIGHT telemetry on the keyboard;
+without it the fighters stay in guard and WPM/batteries display --. Layer telemetry
+is not yet displayed. BLE starts after Wi-Fi connects and
 can be skipped when internal memory is insufficient for native services.
 Stock automatic firmware replacement is blocked by default; activation and
 server configuration continue normally.
