@@ -1,22 +1,22 @@
+#include "codex_metrics.h"
+#include "settings.h"
 #include <driver/uart.h>
+#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+#include <driver/usb_serial_jtag.h>
+#endif
 #include <esp_http_server.h>
-#include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_random.h>
 #include <esp_timer.h>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <mutex>
 #include <string>
-#include "codex_metrics.h"
-#include "settings.h"
 
 namespace {
 std::mutex mutex;
-struct Sample {
-    CodexMetrics metrics;
-    int64_t at = -1;
-} usb, wifi;
+struct Sample { CodexMetrics metrics; int64_t at = -1; } usb, wifi;
 std::string token;
 httpd_handle_t server = nullptr;
 bool uart_ready = false;
@@ -27,8 +27,7 @@ bool Fresh(const Sample& s, int64_t now) {
 
 bool Apply(const char* line, bool is_usb) {
     CodexMetrics metrics;
-    if (!ParseCodexFrame(line, metrics))
-        return false;
+    if (!ParseCodexFrame(line, metrics)) return false;
     std::lock_guard<std::mutex> lock(mutex);
     auto& sample = is_usb ? usb : wifi;
     sample.metrics = metrics;
@@ -39,8 +38,7 @@ bool Apply(const char* line, bool is_usb) {
 std::string IpAddress() {
     auto* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t ip = {};
-    if (netif == nullptr || esp_netif_get_ip_info(netif, &ip) != ESP_OK || ip.ip.addr == 0)
-        return "0.0.0.0";
+    if (netif == nullptr || esp_netif_get_ip_info(netif, &ip) != ESP_OK || ip.ip.addr == 0) return "0.0.0.0";
     char text[20];
     std::snprintf(text, sizeof(text), IPSTR, IP2STR(&ip.ip));
     return text;
@@ -53,8 +51,7 @@ esp_err_t Info(httpd_req_t* req) {
 
 esp_err_t Update(httpd_req_t* req) {
     char authorization[64] = {};
-    if (httpd_req_get_hdr_value_str(req, "X-Cube-Token", authorization, sizeof(authorization)) !=
-            ESP_OK ||
+    if (httpd_req_get_hdr_value_str(req, "X-Cube-Token", authorization, sizeof(authorization)) != ESP_OK ||
         token != authorization) {
         httpd_resp_set_status(req, "403 Forbidden");
         return httpd_resp_sendstr(req, "DENIED\n");
@@ -66,14 +63,11 @@ esp_err_t Update(httpd_req_t* req) {
     int received = 0;
     while (received < req->content_len) {
         int n = httpd_req_recv(req, body + received, req->content_len - received);
-        if (n <= 0)
-            return ESP_FAIL;
+        if (n <= 0) return ESP_FAIL;
         received += n;
     }
-    while (received > 0 && (body[received - 1] == '\n' || body[received - 1] == '\r'))
-        body[--received] = 0;
-    if (!Apply(body, false))
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid CODEX frame");
+    while (received > 0 && (body[received - 1] == '\n' || body[received - 1] == '\r')) body[--received] = 0;
+    if (!Apply(body, false)) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid CODEX frame");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK\n");
 }
@@ -81,7 +75,11 @@ esp_err_t Update(httpd_req_t* req) {
 void Reply(const std::string& line) {
     // Leading newline separates replies from the existing diagnostic console.
     const std::string output = "\n" + line + "\n";
+#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+    usb_serial_jtag_write_bytes(output.data(), output.size(), pdMS_TO_TICKS(200));
+#else
     uart_write_bytes(UART_NUM_0, output.data(), output.size());
+#endif
 }
 
 void SyncTask(void*) {
@@ -97,42 +95,35 @@ void SyncTask(void*) {
             config.stack_size = 4096;
             if (httpd_start(&server, &config) == ESP_OK) {
                 httpd_uri_t info = {};
-                info.uri = "/v1/info";
-                info.method = HTTP_GET;
-                info.handler = Info;
+                info.uri = "/v1/info"; info.method = HTTP_GET; info.handler = Info;
                 httpd_register_uri_handler(server, &info);
                 httpd_uri_t update = {};
-                update.uri = "/v1/codex";
-                update.method = HTTP_POST;
-                update.handler = Update;
+                update.uri = "/v1/codex"; update.method = HTTP_POST; update.handler = Update;
                 httpd_register_uri_handler(server, &update);
             }
         }
         int count = 0;
-        if (uart_ready)
+        if (uart_ready) {
+#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+            count = usb_serial_jtag_read_bytes(bytes, sizeof(bytes), pdMS_TO_TICKS(200));
+#else
             count = uart_read_bytes(UART_NUM_0, bytes, sizeof(bytes), pdMS_TO_TICKS(200));
-        else
-            vTaskDelay(pdMS_TO_TICKS(200));
+#endif
+        }
+        else vTaskDelay(pdMS_TO_TICKS(200));
         for (int i = 0; i < count; ++i) {
             const char c = bytes[i];
             if (c == '\n') {
                 if (!overflow) {
-                    if (line == "PING")
-                        Reply("PROSPECTOR-SCANNER/1");
-                    else if (line == "CAPS")
-                        Reply("CUBE-CODEX/2");
-                    else if (line == "PAIR")
-                        Reply("CUBE-PAIR " + IpAddress() + " " + token);
-                    else if (line.rfind("CODEX", 0) == 0)
-                        Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
+                    if (line == "PING") Reply("PROSPECTOR-SCANNER/1");
+                    else if (line == "CAPS") Reply("CUBE-CODEX/2");
+                    else if (line == "PAIR") Reply("CUBE-PAIR " + IpAddress() + " " + token);
+                    else if (line.rfind("CODEX", 0) == 0) Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
                 }
-                line.clear();
-                overflow = false;
+                line.clear(); overflow = false;
             } else if (c != '\r') {
-                if (line.size() < 159 && !overflow)
-                    line += c;
-                else
-                    overflow = true;
+                if (line.size() < 159 && !overflow) line += c;
+                else overflow = true;
             }
         }
     }
@@ -147,14 +138,11 @@ CodexSnapshot GetCodexSnapshot() {
     // UART bridges cannot reliably report cable removal: USB priority is a
     // 75-second lease refreshed by successful data packets, not by PING.
     if (Fresh(usb, now) && now - usb.at < 75000000) {
-        sample = &usb;
-        snapshot.transport = "USB";
+        sample = &usb; snapshot.transport = "USB";
     } else if (Fresh(wifi, now)) {
-        sample = &wifi;
-        snapshot.transport = "WI-FI";
+        sample = &wifi; snapshot.transport = "WI-FI";
     } else if (Fresh(usb, now)) {
-        sample = &usb;
-        snapshot.transport = "USB";
+        sample = &usb; snapshot.transport = "USB";
     }
     if (sample != nullptr) {
         snapshot.metrics = sample->metrics;
@@ -176,15 +164,25 @@ void StartCodexSync() {
     Settings settings("codex", true);
     token = settings.GetString("token");
     if (token.size() != 32) {
-        uint8_t random[16];
-        esp_fill_random(random, sizeof(random));
+        uint8_t random[16]; esp_fill_random(random, sizeof(random));
         char hex[33];
-        for (int i = 0; i < 16; ++i)
-            std::snprintf(hex + i * 2, 3, "%02x", random[i]);
-        token = hex;
-        settings.SetString("token", token);
+        for (int i = 0; i < 16; ++i) std::snprintf(hex + i * 2, 3, "%02x", random[i]);
+        token = hex; settings.SetString("token", token);
     }
-    // GPIO20 is the native display backlight: never enable native USB here.
+#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+    // Xingzhi's USB connector is wired to the S3 native USB Serial/JTAG.
+    // Keep diagnostic logging on UART0 so logs cannot consume sync requests.
+    usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    usb_config.rx_buffer_size = 1024;
+    usb_config.tx_buffer_size = 1024;
+    if (usb_serial_jtag_is_driver_installed() ||
+        usb_serial_jtag_driver_install(&usb_config) == ESP_OK) {
+        uart_ready = true;
+    } else {
+        ESP_LOGE("CodexSync", "USB Serial/JTAG initialization failed");
+    }
+#else
+    // Zhengchen uses GPIO20 for backlight: its UART transport stays unchanged.
     uart_config_t config = {};
     config.baud_rate = 115200;
     config.data_bits = UART_DATA_8_BITS;
@@ -194,11 +192,10 @@ void StartCodexSync() {
     config.source_clk = UART_SCLK_DEFAULT;
     if (uart_param_config(UART_NUM_0, &config) != ESP_OK ||
         uart_set_pin(UART_NUM_0, 43, 44, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK ||
-        (!uart_is_driver_installed(UART_NUM_0) &&
-         uart_driver_install(UART_NUM_0, 1024, 0, 0, nullptr, 0) != ESP_OK)) {
+        (!uart_is_driver_installed(UART_NUM_0) && uart_driver_install(UART_NUM_0, 1024, 0, 0, nullptr, 0) != ESP_OK)) {
         ESP_LOGE("CodexSync", "UART0 initialization failed");
-    } else
-        uart_ready = true;
+    } else uart_ready = true;
+#endif
     if (xTaskCreate(SyncTask, "codex_sync", 4096, nullptr, 2, nullptr) != pdPASS) {
         ESP_LOGE("CodexSync", "Unable to start sync task");
     }

@@ -42,5 +42,16 @@ class NologoCubePortTest(unittest.TestCase):
         for name, pin in expected.items():
             self.assertRegex(pins, rf'#define\s+{name}\s+GPIO_NUM_{pin}\b')
 
+    def test_native_usb_sync_is_board_scoped(self):
+        sync = (ROOT / 'main/scanner/codex_sync.cc').read_text()
+        self.assertIn('#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI', sync)
+        self.assertIn('usb_serial_jtag_driver_install(&usb_config)', sync)
+        self.assertIn('usb_serial_jtag_read_bytes(bytes', sync)
+        self.assertIn('usb_serial_jtag_write_bytes(output.data()', sync)
+        self.assertIn('uart_set_pin(UART_NUM_0, 43, 44', sync)
+        cmake = (ROOT / 'main/CMakeLists.txt').read_text()
+        self.assertIn('if(CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI)', cmake)
+        self.assertIn('esp_driver_usb_serial_jtag', cmake)
+
 if __name__ == '__main__':
     unittest.main()

@@ -6,7 +6,7 @@ xingzhi-cube-1.54tft-wifi-codex. Do not use this firmware on Zhengchen hardware.
 Features inherited from the current main branch: Codex, Macintosh and Arcade
 themes; Arcade default when no saved choice exists; volume-down long press
 cycles themes; voice theme switching and floating Xiaozhi assistant; always-on
-brightness; USB-UART and Wi-Fi companion sync; BLE Prospector modifiers and
+brightness; native USB Serial/JTAG and Wi-Fi companion sync; BLE Prospector modifiers and
 CUBE-FIGHT left/right WPM/battery telemetry; retained fighter assets, idle and
 attack animations; VS/TODAY hide while WPM is positive and recover after 1.5s
 at zero; right gauges empty from left to right; text-free battery gauges with
@@ -17,8 +17,12 @@ Official hardware mapping is preserved:
 - Buttons: BOOT0, volume-up40, volume-down39.
 - Microphone WS4/SCK5/DIN6; speaker DOUT7/BCLK15/LRCK16.
 - Power hold21, charging38, battery ADC2 channel6 (official calibration retained).
-- Companion serial: UART0 TX43/RX44, 115200. A USB-to-UART path is required;
-  native USB Serial/JTAG is not enabled by this variant.
+- Companion serial: native USB Serial/JTAG on GPIO19/20, exposed as
+  /dev/cu.usbmodem* on macOS. The companion opens it at 115200 and sends CAPS,
+  PAIR and CODEX2 frames. UART0 TX43/RX44 remains diagnostic logging only.
+  Zhengchen's GPIO20 backlight and UART sync implementation are unchanged.
+- Wi-Fi still uses the current device IPv4 address, port 8765. After the USB
+  connection succeeds, use USB pairing to refresh the saved IP and pairing token.
 
 Battery acquisition starts after ADC initialization. Temporary ADC read errors
 do not reboot the board; battery remains unknown until enough samples arrive.
