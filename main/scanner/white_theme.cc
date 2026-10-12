@@ -11,7 +11,7 @@ constexpr uint32_t paper = 0xF8F8F8, ink = 0x202020, muted = 0x808080;
 constexpr uint32_t rule = 0xDDDDDD, blue = 0x167AC6, active = 0xDBEAFC;
 struct Battery { lv_obj_t *fill, *text; int width; };
 struct View {
-    lv_obj_t *layer, *transport, *profile, *wpm, *keys[4], *key_text[4], *bars[9];
+    lv_obj_t *layer, *layer_bold, *transport, *profile, *wpm, *wpm_bold, *keys[4], *key_text[4], *bars[9];
     Battery own, left, right;
     int history[9] = {};
     int64_t last_history = -1;
@@ -87,6 +87,7 @@ lv_obj_t* WhiteCreate(lv_obj_t* parent) {
     Box(root, 151, 14, 1, 29, rule);
     v->own = MakeBattery(root, 163, 21, 28, 15, 196, 18, 37, 19);
     Text(root, "LAYER", 12, 70, 93, 12, muted);
+    v->layer_bold = Text(root, "--", 11, 92, 106, 36);
     v->layer = Text(root, "--", 10, 92, 106, 36);
     Box(root, 117, 74, 1, 65, rule);
     const char* names[] = {"Ctrl", "Alt", "Gui", "Sft"};
@@ -101,6 +102,7 @@ lv_obj_t* WhiteCreate(lv_obj_t* parent) {
     Text(root, "RIGHT KB", 163, 164, 74, 11, muted, true);
     v->left = MakeBattery(root, 24, 187, 33, 18, 7, 211, 66, 23);
     v->right = MakeBattery(root, 184, 187, 33, 18, 166, 211, 70, 23);
+    v->wpm_bold = Text(root, "--", 85, 184, 73, 35, ink, true);
     v->wpm = Text(root, "--", 84, 184, 73, 35, ink, true);
     for (int i = 0; i < 9; ++i) v->bars[i] = Box(root, 92 + i * 6, 232, 3, 1, 0xCCCCCC, 2);
     return root;
@@ -119,6 +121,7 @@ void WhiteRefresh(lv_obj_t* root) {
     const auto kb = GetKeyboardStatus(); const auto fight = GetFightTelemetry();
     WhiteSetModifiers(root, fight.online ? fight.modifiers : kb.online ? kb.modifiers : 0);
     lv_label_set_text(v->layer, kb.online && kb.layer[0] ? kb.layer : "--");
+    lv_label_set_text(v->layer_bold, kb.online && kb.layer[0] ? kb.layer : "--");
     lv_label_set_text(v->transport, kb.online ? (kb.usb ? "USB" : kb.ble ? "BLE" : "OFF") : "--");
     char text[12] = "--";
     if (kb.online) std::snprintf(text, sizeof(text), "%d", kb.profile);
@@ -130,6 +133,7 @@ void WhiteRefresh(lv_obj_t* root) {
     if (kb.online) std::snprintf(text, sizeof(text), "%d", kb.wpm);
     else std::snprintf(text, sizeof(text), "--");
     lv_label_set_text(v->wpm, text);
+    lv_label_set_text(v->wpm_bold, text);
     const auto second = esp_timer_get_time() / 1000000;
     if (second != v->last_history) {
         v->last_history = second;
