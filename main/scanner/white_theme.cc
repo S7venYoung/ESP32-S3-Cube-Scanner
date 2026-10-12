@@ -23,7 +23,7 @@ lv_obj_t* Box(lv_obj_t* parent, int x, int y, int w, int h, uint32_t color, int 
     lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(o, radius, 0);
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(o, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     return o;
 }
 lv_obj_t* Text(lv_obj_t* parent, const char* value, int x, int y, int w, int height,
@@ -34,7 +34,7 @@ lv_obj_t* Text(lv_obj_t* parent, const char* value, int x, int y, int w, int hei
     lv_label_set_long_mode(o, LV_LABEL_LONG_CLIP);
     lv_label_set_text(o, value);
     // Reuse the existing system font, scaled to the reference's visual hierarchy.
-    const int scale = height * 256 / LV_FONT_DEFAULT->line_height;
+    const int scale = height * 256 / (LV_FONT_DEFAULT)->line_height;
     lv_obj_set_width(o, w * 256 / std::max(1, scale));
     lv_obj_set_pos(o, x, y);
     lv_obj_set_style_transform_pivot_x(o, 0, 0);
