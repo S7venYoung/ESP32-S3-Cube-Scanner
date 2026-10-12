@@ -12,6 +12,17 @@ attack animations; VS/TODAY hide while WPM is positive and recover after 1.5s
 at zero; right gauges empty from left to right; text-free battery gauges with
 orange low battery and a neutral unknown marker. No fake keyboard data.
 
+White minimalist theme (theme=white) follows the supplied white/blue reference:
+keyboard layer, BLE profile, Ctrl/Alt/Gui/Sft highlights, own battery,
+left/right keyboard batteries and canonical total WPM with a measured history.
+Long-press volume-down cycles Codex -> Macintosh -> Arcade -> White -> Codex.
+Say "你好小智，切换白色主题" or "切换简约主题" to select it.
+The existing saved/default Arcade selection is preserved. Quota sync and voice
+remain active in the background. Unavailable keyboard metrics are shown as --;
+BLE profile and layer require the original 26-byte Prospector advertisement.
+Peripheral battery zero in that original protocol means unavailable. Exact
+zero battery remains representable by the separate CUBE-FIGHT telemetry.
+
 Official hardware mapping is preserved:
 - ST7789 240x240, SPI3: MOSI10/SCLK9/DC8/CS14/RESET18/backlight13.
 - Buttons: BOOT0, volume-up40, volume-down39.

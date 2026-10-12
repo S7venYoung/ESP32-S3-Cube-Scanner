@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <string>
 
-enum class DashboardVoiceCommand { None, Codex, Macintosh, Arcade };
+enum class DashboardVoiceCommand { None, Codex, Macintosh, Arcade, White };
 inline DashboardVoiceCommand DashboardVoiceIntent(std::string text) {
     for (const auto* token : {" ", "\t", "\n", ",", ".", "!", "?", "，", "。", "！", "？"}) {
         size_t at;
@@ -15,6 +15,7 @@ inline DashboardVoiceCommand DashboardVoiceIntent(std::string text) {
     for (const auto* prefix : {"切换到", "切换为", "切换", "换成"}) {
         if (text.rfind(prefix, 0) != 0) continue;
         const auto name = text.substr(std::string(prefix).size());
+        if (name == "白色主题" || name == "简约主题" || name == "white主题") return DashboardVoiceCommand::White;
         if (name == "迈克主题" || name == "麦金塔主题" || name == "麦金塔" ||
             name == "mac主题" || name == "macintosh主题") return DashboardVoiceCommand::Macintosh;
         if (name == "codex主题" || name == "codex") return DashboardVoiceCommand::Codex;

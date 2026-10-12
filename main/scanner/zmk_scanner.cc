@@ -3,6 +3,7 @@
 #include "board.h"
 #include "application.h"
 #include "prospector_modifiers.h"
+#include "keyboard_status.h"
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -30,6 +31,9 @@ int64_t modifier_seen_us = -1;
 uint8_t modifier_state = 0;
 std::mutex fight_mutex;
 FightTelemetry fight_data;
+KeyboardStatus keyboard_data;
+std::string keyboard_address;
+int64_t keyboard_seen_us = -1;
 int64_t fight_seen_us = -1;
 void BeginDiscovery();
 
@@ -81,6 +85,15 @@ void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
             } else if (accepted) modifier_seen_us=now;
         }
         uint8_t mods=0;
+        KeyboardStatus keyboard;
+        if (data[pos] == 0xff && ParseKeyboardStatus(data + pos + 1, length - 1, keyboard)) {
+            std::lock_guard<std::mutex> lock(fight_mutex);
+            if (keyboard_seen_us < 0 || now - keyboard_seen_us > 10000000 || keyboard_address == address) {
+                keyboard_data = keyboard;
+                keyboard_address = address;
+                keyboard_seen_us = now;
+            }
+        }
         bool fight_active;
         { std::lock_guard<std::mutex> lock(fight_mutex); fight_active=fight_seen_us>=0 && now-fight_seen_us<=3000000; }
         if (!fight_active && (modifier_address.empty() || modifier_address==address) &&
@@ -175,6 +188,12 @@ FightTelemetry GetFightTelemetry() {
     std::lock_guard<std::mutex> lock(fight_mutex);
     if (fight_seen_us<0 || esp_timer_get_time()-fight_seen_us>3000000) return {};
     return fight_data;
+}
+
+KeyboardStatus GetKeyboardStatus() {
+    std::lock_guard<std::mutex> lock(fight_mutex);
+    if (keyboard_seen_us < 0 || esp_timer_get_time() - keyboard_seen_us > 10000000) return {};
+    return keyboard_data;
 }
 
 void StartZmkScanner() {
