@@ -1,0 +1,21 @@
+name: Test experimental Cube dongle core
+on:
+  push:
+    branches: [codex/xingzhi-cube-dongle]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-state:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check C++ formatting
+        run: |
+          python3 -m venv /tmp/cube-dongle-format
+          /tmp/cube-dongle-format/bin/pip install clang-format==21.1.8
+          /tmp/cube-dongle-format/bin/clang-format --dry-run -Werror experimental/cube_dongle/split_state.h experimental/cube_dongle/state_test.cc
+      - name: Check position state, layers, release safety and output routing
+        run: |
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/state_test.cc -o /tmp/cube-dongle-state-test
+          /tmp/cube-dongle-state-test
