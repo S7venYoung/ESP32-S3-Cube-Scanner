@@ -1,4 +1,8 @@
 #include "cube_split_bench.h"
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#include "../../experimental/cube_dongle/velvet_keymap.h"
+#include "cube_usb_dongle.h"
+#endif
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "../../experimental/cube_dongle/velvet_positions.h"
 
@@ -50,6 +54,18 @@ struct Peer {
 };
 Peer peers[2];
 cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
+void PublishKeyboard() {
+    keyboard.Apply(input.Combined());
+    CubeUsbSubmit({keyboard.Report(), keyboard.MediaReport()});
+    if (keyboard.Actions())
+        ESP_LOGW(kTag, "Host BLE profile command unsupported by USB-only candidate: %u",
+                 keyboard.Actions());
+}
+#else
+void PublishKeyboard() {}
+#endif
 ble_npl_callout retry;
 bool connecting = false;
 bool callouts_initialized = false;
@@ -93,6 +109,7 @@ bool Encrypted(const Peer& peer) {
 void Fail(Peer& peer, const char* reason) {
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
     input.Disconnect(Side(peer));
+    PublishKeyboard();
     peer.phase = Phase::Closing;
     PublishStatus();
     ble_npl_callout_stop(&peer.timeout);
@@ -118,6 +135,7 @@ bool Snapshot(Peer& peer, os_mbuf* mbuf) {
         !input.Apply(Side(peer), bytes, sizeof(bytes), Encrypted(peer)))
         return false;
     const auto state = input.Combined();
+    PublishKeyboard();
     PublishStatus();
     unsigned pressed = 0;
     for (uint8_t byte : state)
@@ -292,6 +310,7 @@ int OnGap(ble_gap_event* event, void* arg) {
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                peer.connection == event->disconnect.conn.conn_handle) {
         input.Disconnect(cookie & 1);
+        PublishKeyboard();
         ble_npl_callout_stop(&peer.timeout);
         peer.connection = BLE_HS_CONN_HANDLE_NONE;
         peer.phase = Phase::Idle;
@@ -388,6 +407,7 @@ void OnReset(int reason) {
         ++peers[side].generation;
     }
     PublishStatus();
+    PublishKeyboard();
 }
 void Host(void*) {
     nimble_port_run();

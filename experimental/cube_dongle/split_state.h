@@ -47,10 +47,10 @@ private:
     std::array<Snapshot, 2> states_{};
 };
 
-enum class Kind { None, Transparent, Key, MomentaryLayer };
+enum class Kind { None, Transparent, Key, MomentaryLayer, Media, HostAction };
 struct Binding {
     Kind kind = Kind::None;
-    uint8_t value = 0;  // HID keyboard-page usage, or momentary layer index
+    uint16_t value = 0;  // Keyboard usage, layer, media bits, or explicit host command
     uint8_t modifiers = 0;
 };
 
@@ -68,6 +68,7 @@ public:
     // Process releases first. Latch press-time bindings so changing layers never
     // changes which usage is released. Simultaneous layer presses resolve first.
     void Apply(const SplitState::Snapshot& snapshot) {
+        actions_ = 0;
         for (size_t p = 0; p < Positions; ++p) {
             if (pressed_[p] && !Down(snapshot, p)) {
                 pressed_[p] = false;
@@ -115,6 +116,14 @@ public:
                 report[i] = 1;
         return report;
     }
+    uint8_t MediaReport() const {
+        uint8_t bits = 0;
+        for (size_t p = 0; p < Positions; ++p)
+            if (pressed_[p] && latched_[p].kind == Kind::Media)
+                bits |= latched_[p].value;
+        return bits;
+    }
+    uint16_t Actions() const { return actions_; }
 
 private:
     static bool Down(const SplitState::Snapshot& snapshot, size_t position) {
@@ -137,10 +146,13 @@ private:
     void Latch(size_t position, Binding binding) {
         pressed_[position] = true;
         latched_[position] = binding;
+        if (binding.kind == Kind::HostAction && binding.value < 16)
+            actions_ |= 1u << binding.value;
     }
     Keymap keymap_;
     std::array<bool, Positions> pressed_{};
     std::array<Binding, Positions> latched_{};
+    uint16_t actions_ = 0;
 };
 
 // Adapter must return true only when the transport accepted this report.

@@ -1,4 +1,7 @@
 #include "codex_metrics.h"
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#include "cube_usb_dongle.h"
+#endif
 #if CONFIG_CUBE_SPLIT_BENCH
 #include "cube_split_bench.h"
 #endif
@@ -78,7 +81,9 @@ esp_err_t Update(httpd_req_t* req) {
 void Reply(const std::string& line) {
     // Leading newline separates replies from the existing diagnostic console.
     const std::string output = "\n" + line + "\n";
-#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+    CubeCdcWrite(output.data(), output.size());
+#elif CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
     usb_serial_jtag_write_bytes(output.data(), output.size(), pdMS_TO_TICKS(200));
 #else
     uart_write_bytes(UART_NUM_0, output.data(), output.size());
@@ -107,7 +112,9 @@ void SyncTask(void*) {
         }
         int count = 0;
         if (uart_ready) {
-#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+            count = CubeCdcRead(bytes, sizeof(bytes));
+#elif CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
             count = usb_serial_jtag_read_bytes(bytes, sizeof(bytes), pdMS_TO_TICKS(200));
 #else
             count = uart_read_bytes(UART_NUM_0, bytes, sizeof(bytes), pdMS_TO_TICKS(200));
@@ -122,8 +129,16 @@ void SyncTask(void*) {
                     else if (line == "CAPS") Reply("CUBE-CODEX/2");
                     else if (line == "PAIR") Reply("CUBE-PAIR " + IpAddress() + " " + token);
 #if CONFIG_CUBE_SPLIT_BENCH
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+                    else if (line == "DONGLE") Reply("CUBE-USB-CANDIDATE/1 " + std::to_string(CubeSplitBenchStatus()) + " HID-ON");
+#else
                     else if (line == "DONGLE") Reply("CUBE-SPLIT-BENCH/1 " + std::to_string(CubeSplitBenchStatus()) + " HID-OFF");
+#endif
                     else if (line.rfind("DONGLE BIND ", 0) == 0) Reply(CubeSplitBenchBind(line));
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+                    else if (line == "DONGLE ENABLE") { CubeUsbEnable(true); Reply("CUBE-USB-CANDIDATE ENABLED"); }
+                    else if (line == "DONGLE DISABLE") { CubeUsbEnable(false); Reply("CUBE-USB-CANDIDATE DISABLED"); }
+#endif
 #endif
                     else if (line.rfind("CODEX", 0) == 0) Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
                 }
@@ -176,7 +191,10 @@ void StartCodexSync() {
         for (int i = 0; i < 16; ++i) std::snprintf(hex + i * 2, 3, "%02x", random[i]);
         token = hex; settings.SetString("token", token);
     }
-#if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+    uart_ready = StartCubeUsbDongle();
+    if (!uart_ready) ESP_LOGE("CodexSync", "USB HID/CDC initialization failed");
+#elif CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
     // Xingzhi's USB connector is wired to the S3 native USB Serial/JTAG.
     // Keep diagnostic logging on UART0 so logs cannot consume sync requests.
     usb_serial_jtag_driver_config_t usb_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();

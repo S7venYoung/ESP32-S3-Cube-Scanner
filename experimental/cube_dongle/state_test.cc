@@ -1,12 +1,56 @@
 #include <cassert>
 #include <vector>
 #include "peer_binding.h"
+#include "report_queue.h"
 #include "split_state.h"
+#include "velvet_keymap.h"
 #include "velvet_positions.h"
 
 using namespace cube_dongle;
 
 int main() {
+    KeyboardState<61, 3> real_keyboard(VelvetKeymap());
+    SplitState::Snapshot real_positions{};
+    auto down = [&](size_t p) { real_positions[p / 8] |= 1u << (p % 8); };
+    down(13);  // Q
+    real_keyboard.Apply(real_positions);
+    assert(real_keyboard.Report()[2] == 20);
+    real_positions = {};
+    down(57);  // momentary NVA layer
+    down(15);  // Volume Down
+    down(16);  // Volume Up, must not drop either media button
+    real_keyboard.Apply(real_positions);
+    assert(real_keyboard.Report() == KeyboardReport{});
+    assert(real_keyboard.MediaReport() == 3);
+    real_positions = {};
+    down(55);  // Space
+    down(54);  // momentary SYS
+    down(47);  // BT_SEL 2 in SYS
+    real_keyboard.Apply(real_positions);
+    assert(real_keyboard.Actions() == 4);
+    assert(real_keyboard.Report()[2] == 44);
+    real_keyboard.Apply(real_positions);
+    assert(real_keyboard.Actions() == 0);  // no repeated destructive command on a snapshot
+    real_keyboard.Apply({});
+    assert(real_keyboard.Report() == KeyboardReport{} && real_keyboard.MediaReport() == 0);
+
+    ReportQueue<2> queue;
+    ReportFrame a, b;
+    a.keyboard[2] = 4;
+    b.keyboard[2] = 5;
+    assert(queue.Push(a) && queue.Push({}));
+    assert(queue.Front()->keyboard[2] == 4);
+    queue.Pop();
+    assert(queue.Front()->Neutral());
+    queue.Pop();
+    assert(!queue.Front());
+    assert(queue.Push(a) && queue.Push(b));
+    assert(!queue.Push(a));  // full queue must release, never silently lose a key-up
+    assert(queue.Front()->Neutral() && queue.Inhibited());
+    assert(!queue.Push(b));
+    assert(queue.Push({}) && !queue.Inhibited());
+    queue.Pop();
+    assert(queue.Push(a));
     PeerBinding identity;
     assert(ParseIdentity("C1:23:45:67:89:AB", 1, identity));
     assert(identity.bytes[0] == 0xab && identity.bytes[5] == 0xc1);

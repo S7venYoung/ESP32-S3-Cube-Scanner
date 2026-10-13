@@ -23,6 +23,15 @@ config CUBE_SPLIT_LEFT_ADDRESS
     depends on CUBE_SPLIT_BENCH
     default ""
 
+config CUBE_USB_DONGLE_OUTPUT
+    bool "Experimental Cube USB keyboard + CDC output candidate"
+    depends on CUBE_SPLIT_BENCH
+    default n
+    help
+        Enables USB keyboard/media output using the pinned Velvet keymap.
+        Replaces USB Serial/JTAG sync with TinyUSB CDC. BLE computer output
+        and advanced ZMK behaviors are not implemented by this candidate.
+
 config CUBE_SPLIT_LEFT_ADDRESS_TYPE
     int "Left identity address type (0 public, 1 static random)"
     depends on CUBE_SPLIT_BENCH

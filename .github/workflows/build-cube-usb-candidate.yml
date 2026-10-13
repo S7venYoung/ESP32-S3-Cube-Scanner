@@ -1,0 +1,48 @@
+name: Build Cube USB dongle candidate
+on:
+  push:
+    branches: [codex/xingzhi-cube-dongle]
+    paths:
+      - 'main/**'
+      - 'experimental/cube_dongle/**'
+      - 'scripts/build-cube-usb-candidate.sh'
+      - '.github/workflows/build-cube-usb-candidate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  usb-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply inherited integration formatting
+        run: |
+          python3 -m venv /tmp/cube-format-env
+          /tmp/cube-format-env/bin/pip install clang-format==21.1.8
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/*.cc main/scanner/*.h
+          /tmp/cube-format-env/bin/clang-format -i main/boards/nologo/xingzhi-cube-1.54tft-wifi/xingzhi-cube-1.54tft-wifi.cc main/boards/nologo/xingzhi-cube-1.54tft-wifi/power_manager.h
+      - name: Build actual HID + CDC output candidate
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          path: .
+          command: bash scripts/build-cube-usb-candidate.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cube-USB-Dongle-CANDIDATE-NOT-FINAL
+          path: |
+            build/merged-binary.bin
+            build/xingzhi_cube_usb_candidate.bin
+            build/xiaozhi.bin
+            build/generated_assets.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            build/flash_args
+            build/flasher_args.json
+            build/sdkconfig
+            build/SHA256SUMS
+            build/CANDIDATE-NOT-FINAL.md
+          if-no-files-found: error
