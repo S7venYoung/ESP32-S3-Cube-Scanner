@@ -10,6 +10,36 @@ config ZMK_SCANNER_NAME_FILTER
     depends on ZMK_SCANNER_MODE
     default ""
 
+config CUBE_SPLIT_BENCH
+    bool "Experimental Cube split GATT input bench (HID disabled)"
+    depends on ZMK_SCANNER_MODE && BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI && BT_NIMBLE_ROLE_CENTRAL
+    default n
+    help
+        Replaces advertisement-only scanning with an allowlisted split GATT client.
+        Does not output USB or BLE keyboard input. Use only for bench validation.
+
+config CUBE_SPLIT_LEFT_ADDRESS
+    string "Left keyboard public/static BLE identity (AA:BB:CC:DD:EE:FF)"
+    depends on CUBE_SPLIT_BENCH
+    default ""
+
+config CUBE_SPLIT_LEFT_ADDRESS_TYPE
+    int "Left identity address type (0 public, 1 static random)"
+    depends on CUBE_SPLIT_BENCH
+    range 0 1
+    default 1
+
+config CUBE_SPLIT_RIGHT_ADDRESS
+    string "Right keyboard public/static BLE identity (AA:BB:CC:DD:EE:FF)"
+    depends on CUBE_SPLIT_BENCH
+    default ""
+
+config CUBE_SPLIT_RIGHT_ADDRESS_TYPE
+    int "Right identity address type (0 public, 1 static random)"
+    depends on CUBE_SPLIT_BENCH
+    range 0 1
+    default 1
+
 config CUBE_ALLOW_STOCK_OTA
     bool "Allow stock OTA to replace custom Cube firmware"
     depends on ZMK_SCANNER_MODE

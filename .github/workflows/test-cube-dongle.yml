@@ -14,7 +14,7 @@ jobs:
         run: |
           python3 -m venv /tmp/cube-dongle-format
           /tmp/cube-dongle-format/bin/pip install clang-format==21.1.8
-          /tmp/cube-dongle-format/bin/clang-format --dry-run -Werror experimental/cube_dongle/split_state.h experimental/cube_dongle/state_test.cc
+          /tmp/cube-dongle-format/bin/clang-format --dry-run -Werror experimental/cube_dongle/split_state.h experimental/cube_dongle/state_test.cc experimental/cube_dongle/velvet_positions.h main/scanner/cube_split_bench.cc main/scanner/cube_split_bench.h
       - name: Check position state, layers, release safety and output routing
         run: |
           clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/state_test.cc -o /tmp/cube-dongle-state-test

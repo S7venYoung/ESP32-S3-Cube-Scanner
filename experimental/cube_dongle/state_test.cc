@@ -1,10 +1,22 @@
 #include <cassert>
 #include <vector>
 #include "split_state.h"
+#include "velvet_positions.h"
 
 using namespace cube_dongle;
 
 int main() {
+    constexpr auto velvet = VelvetOwnership();
+    unsigned left_count = 0, right_count = 0;
+    for (size_t p = 0; p < 128; ++p) {
+        const bool left = velvet[0][p / 8] & (1u << (p % 8));
+        const bool right = velvet[1][p / 8] & (1u << (p % 8));
+        assert(!(left && right));
+        assert((left || right) == (p < 61));
+        left_count += left;
+        right_count += right;
+    }
+    assert(left_count == 32 && right_count == 29);
     SplitState::Ownership owners{};
     owners[0][0] = 0x0f;
     owners[1][0] = 0xf0;

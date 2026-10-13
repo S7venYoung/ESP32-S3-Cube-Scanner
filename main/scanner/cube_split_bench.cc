@@ -1,0 +1,392 @@
+#include "cube_split_bench.h"
+#include "../../experimental/cube_dongle/velvet_positions.h"
+
+#include <esp_log.h>
+#include <esp_timer.h>
+#include <host/ble_gap.h>
+#include <host/ble_gatt.h>
+#include <host/ble_hs.h>
+#include <host/ble_sm.h>
+#include <host/ble_store.h>
+#include <host/util/util.h>
+#include <nimble/nimble_port.h>
+#include <nimble/nimble_port_freertos.h>
+#include <os/os_mbuf.h>
+#include <cstdio>
+#include <cstring>
+
+extern "C" void ble_store_config_init(void);
+
+namespace {
+constexpr char kTag[] = "CubeSplitBench";
+const ble_uuid128_t kService = BLE_UUID128_INIT(0x2a, 0x48, 0xc2, 0xb1, 0xcf, 0xc5, 0x67, 0xc9,
+                                                0x07, 0x71, 0x96, 0x00, 0x00, 0x00, 0x00, 0x00);
+const ble_uuid128_t kPosition = BLE_UUID128_INIT(0x2a, 0x48, 0xc2, 0xb1, 0xcf, 0xc5, 0x67, 0xc9,
+                                                 0x07, 0x71, 0x96, 0x00, 0x01, 0x00, 0x00, 0x00);
+enum class Phase {
+    Idle,
+    Connecting,
+    Security,
+    Service,
+    Characteristic,
+    Ccc,
+    Reading,
+    Ready,
+    Closing
+};
+struct Peer {
+    ble_addr_t address{};
+    bool configured = false;
+    uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
+    uintptr_t generation = 1;
+    Phase phase = Phase::Idle;
+    uint16_t service_start = 0, service_end = 0, value = 0, char_end = 0, ccc = 0;
+    bool notified_during_read = false;
+    int64_t retry_after = 0;
+    ble_npl_callout timeout{};
+};
+Peer peers[2];
+cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
+ble_npl_callout retry;
+bool connecting = false;
+bool callouts_initialized = false;
+uint8_t own_address_type = 0;
+
+int OnGap(ble_gap_event* event, void* arg);
+void Scan(ble_npl_event*);
+
+void Retry() { ble_npl_callout_reset(&retry, ble_npl_time_ms_to_ticks32(2000)); }
+void* Cookie(size_t side) { return reinterpret_cast<void*>((peers[side].generation << 1) | side); }
+Peer* Current(uint16_t conn, void* arg) {
+    const auto cookie = reinterpret_cast<uintptr_t>(arg);
+    Peer& peer = peers[cookie & 1];
+    if ((cookie >> 1) != peer.generation || conn != peer.connection || peer.phase == Phase::Closing)
+        return nullptr;
+    return &peer;
+}
+size_t Side(const Peer& peer) { return static_cast<size_t>(&peer - peers); }
+bool Encrypted(const Peer& peer) {
+    ble_gap_conn_desc desc{};
+    return ble_gap_conn_find(peer.connection, &desc) == 0 && desc.sec_state.encrypted &&
+           std::memcmp(desc.peer_id_addr.val, peer.address.val, 6) == 0 &&
+           (desc.peer_id_addr.type & 1) == peer.address.type;
+}
+void Fail(Peer& peer, const char* reason) {
+    ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
+    input.Disconnect(Side(peer));
+    peer.phase = Phase::Closing;
+    ble_npl_callout_stop(&peer.timeout);
+    const int rc = ble_gap_terminate(peer.connection, BLE_ERR_REM_USER_CONN_TERM);
+    if (rc == BLE_HS_ENOTCONN) {
+        peer.connection = BLE_HS_CONN_HANDLE_NONE;
+        peer.phase = Phase::Idle;
+        ++peer.generation;
+        peer.retry_after = esp_timer_get_time() + 5000000;
+        Retry();
+    } else if (rc)
+        ESP_LOGE(kTag, "Terminate failed: %d; peer remains quarantined", rc);
+}
+void Timeout(ble_npl_event* event) {
+    auto& peer = *static_cast<Peer*>(ble_npl_event_get_arg(event));
+    if (peer.connection != BLE_HS_CONN_HANDLE_NONE && peer.phase != Phase::Ready)
+        Fail(peer, "handshake timeout");
+}
+bool Snapshot(Peer& peer, os_mbuf* mbuf) {
+    uint8_t bytes[16];
+    if (!mbuf || OS_MBUF_PKTLEN(mbuf) != sizeof(bytes) ||
+        os_mbuf_copydata(mbuf, 0, sizeof(bytes), bytes) ||
+        !input.Apply(Side(peer), bytes, sizeof(bytes), Encrypted(peer)))
+        return false;
+    const auto state = input.Combined();
+    unsigned pressed = 0;
+    for (uint8_t byte : state)
+        for (; byte; byte &= byte - 1)
+            ++pressed;
+    ESP_LOGI(kTag, "%s snapshot accepted, total pressed=%u (HID OFF)",
+             Side(peer) ? "right" : "left", pressed);
+    return true;
+}
+int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Reading)
+        return 0;
+    if (error->status || !attr || (!peer->notified_during_read && !Snapshot(*peer, attr->om))) {
+        Fail(*peer, "initial position read failed");
+        return 0;
+    }
+    peer->phase = Phase::Ready;
+    ble_npl_callout_stop(&peer->timeout);
+    ESP_LOGI(kTag, "%s ready, encrypted input only; HID OFF", Side(*peer) ? "right" : "left");
+    return 0;
+}
+int OnSubscribed(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr*, void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Ccc)
+        return 0;
+    if (error->status) {
+        Fail(*peer, "CCC write failed");
+        return 0;
+    }
+    peer->phase = Phase::Reading;
+    if (ble_gattc_read(conn, peer->value, OnRead, arg))
+        Fail(*peer, "cannot start initial read");
+    return 0;
+}
+int OnDescriptor(uint16_t conn, const ble_gatt_error* error, uint16_t,
+                 const ble_gatt_dsc* descriptor, void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Ccc)
+        return 0;
+    if (error->status == 0 && descriptor) {
+        if (ble_uuid_u16(&descriptor->uuid.u) == 0x2902)
+            peer->ccc = descriptor->handle;
+    } else if (error->status == BLE_HS_EDONE && peer->ccc) {
+        const uint8_t enable[] = {1, 0};
+        if (ble_gattc_write_flat(conn, peer->ccc, enable, sizeof(enable), OnSubscribed, arg))
+            Fail(*peer, "cannot subscribe");
+    } else
+        Fail(*peer, "position CCC not found");
+    return 0;
+}
+int OnCharacteristic(uint16_t conn, const ble_gatt_error* error, const ble_gatt_chr* chr,
+                     void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Characteristic)
+        return 0;
+    if (!error->status && chr) {
+        if (ble_uuid_cmp(&chr->uuid.u, &kPosition.u) == 0) {
+            if ((chr->properties & (BLE_GATT_CHR_PROP_READ | BLE_GATT_CHR_PROP_NOTIFY)) !=
+                (BLE_GATT_CHR_PROP_READ | BLE_GATT_CHR_PROP_NOTIFY)) {
+                Fail(*peer, "position characteristic lacks read/notify");
+                return 0;
+            }
+            peer->value = chr->val_handle;
+        } else if (peer->value && chr->def_handle > peer->value &&
+                   chr->def_handle - 1 < peer->char_end) {
+            peer->char_end = chr->def_handle - 1;
+        }
+    } else if (error->status == BLE_HS_EDONE && peer->value && peer->char_end > peer->value) {
+        peer->phase = Phase::Ccc;
+        if (ble_gattc_disc_all_dscs(conn, peer->value, peer->char_end, OnDescriptor, arg))
+            Fail(*peer, "cannot discover CCC");
+    } else
+        Fail(*peer, "position characteristic not found");
+    return 0;
+}
+int OnService(uint16_t conn, const ble_gatt_error* error, const ble_gatt_svc* service, void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Service)
+        return 0;
+    if (!error->status && service) {
+        if (peer->service_start) {
+            Fail(*peer, "ambiguous split services");
+            return 0;
+        }
+        peer->service_start = service->start_handle;
+        peer->service_end = service->end_handle;
+    } else if (error->status == BLE_HS_EDONE && peer->service_start) {
+        peer->phase = Phase::Characteristic;
+        peer->char_end = peer->service_end;
+        if (ble_gattc_disc_all_chrs(conn, peer->service_start, peer->service_end, OnCharacteristic,
+                                    arg))
+            Fail(*peer, "cannot discover characteristics");
+    } else
+        Fail(*peer, "split service not found");
+    return 0;
+}
+void Discover(Peer& peer) {
+    if (!Encrypted(peer)) {
+        Fail(peer, "encryption or peer identity mismatch");
+        return;
+    }
+    peer.phase = Phase::Service;
+    if (ble_gattc_disc_svc_by_uuid(peer.connection, &kService.u, OnService, Cookie(Side(peer))))
+        Fail(peer, "cannot discover split service");
+}
+bool AdvertisesSplit(const ble_gap_disc_desc& disc) {
+    ble_hs_adv_fields fields{};
+    if (ble_hs_adv_parse_fields(&fields, disc.data, disc.length_data))
+        return false;
+    for (size_t i = 0; i < fields.num_uuids128; ++i)
+        if (!ble_uuid_cmp(&fields.uuids128[i].u, &kService.u))
+            return true;
+    return false;
+}
+int OnGap(ble_gap_event* event, void* arg) {
+    if (event->type == BLE_GAP_EVENT_DISC) {
+        if (connecting || !AdvertisesSplit(event->disc))
+            return 0;
+        for (size_t side = 0; side < 2; ++side) {
+            auto& peer = peers[side];
+            if (!peer.configured || peer.phase != Phase::Idle ||
+                esp_timer_get_time() < peer.retry_after ||
+                peer.address.type != event->disc.addr.type ||
+                std::memcmp(peer.address.val, event->disc.addr.val, 6))
+                continue;
+            connecting = true;
+            peer.phase = Phase::Connecting;
+            ++peer.generation;
+            ble_gap_disc_cancel();
+            const int rc = ble_gap_connect(own_address_type, &peer.address, 10000, nullptr, OnGap,
+                                           Cookie(side));
+            if (rc) {
+                peer.phase = Phase::Idle;
+                peer.retry_after = esp_timer_get_time() + 5000000;
+                connecting = false;
+                Retry();
+            }
+            break;
+        }
+        return 0;
+    }
+    if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
+        if (!connecting)
+            Retry();
+        return 0;
+    }
+    const auto cookie = reinterpret_cast<uintptr_t>(arg);
+    auto& peer = peers[cookie & 1];
+    if ((cookie >> 1) != peer.generation)
+        return 0;
+    if (peer.phase == Phase::Closing && event->type != BLE_GAP_EVENT_DISCONNECT)
+        return 0;
+    if (event->type == BLE_GAP_EVENT_CONNECT) {
+        connecting = false;
+        if (event->connect.status) {
+            peer.phase = Phase::Idle;
+            peer.retry_after = esp_timer_get_time() + 5000000;
+        } else {
+            peer.connection = event->connect.conn_handle;
+            peer.phase = Phase::Security;
+            peer.service_start = peer.service_end = peer.value = peer.ccc = 0;
+            peer.notified_during_read = false;
+            ble_npl_callout_reset(&peer.timeout, ble_npl_time_ms_to_ticks32(15000));
+            if (Encrypted(peer))
+                Discover(peer);
+            else if (ble_gap_security_initiate(peer.connection))
+                Fail(peer, "cannot initiate security");
+        }
+        Retry();
+    } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
+               peer.connection == event->disconnect.conn.conn_handle) {
+        input.Disconnect(cookie & 1);
+        ble_npl_callout_stop(&peer.timeout);
+        peer.connection = BLE_HS_CONN_HANDLE_NONE;
+        peer.phase = Phase::Idle;
+        ++peer.generation;
+        peer.retry_after = esp_timer_get_time() + 5000000;
+        ESP_LOGI(kTag, "%s disconnected; its positions released", (cookie & 1) ? "right" : "left");
+        Retry();
+    } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
+               peer.connection == event->enc_change.conn_handle) {
+        if (event->enc_change.status || !Encrypted(peer))
+            Fail(peer, "security failed; bonds NOT deleted");
+        else if (peer.phase == Phase::Security)
+            Discover(peer);
+    } else if (event->type == BLE_GAP_EVENT_NOTIFY_RX &&
+               peer.connection == event->notify_rx.conn_handle &&
+               event->notify_rx.attr_handle == peer.value &&
+               (peer.phase == Phase::Ready || peer.phase == Phase::Reading)) {
+        if (!Snapshot(peer, event->notify_rx.om))
+            Fail(peer, "invalid position notification");
+        else if (peer.phase == Phase::Reading)
+            peer.notified_during_read = true;
+    } else if (event->type == BLE_GAP_EVENT_REPEAT_PAIRING) {
+        return BLE_GAP_REPEAT_PAIRING_IGNORE;  // Never silently erase working bonds.
+    }
+    return 0;
+}
+void Scan(ble_npl_event*) {
+    if (connecting || ble_gap_disc_active())
+        return;
+    bool wanted = false;
+    for (const auto& peer : peers)
+        wanted |= peer.configured && peer.phase == Phase::Idle;
+    if (!wanted)
+        return;
+    ble_gap_disc_params params{};
+    params.passive = 1;
+    params.itvl = 0x100;
+    params.window = 0x30;
+    params.filter_duplicates = 1;
+    if (ble_gap_disc(own_address_type, 5000, &params, OnGap, nullptr))
+        Retry();
+}
+bool Configure(Peer& peer, const char* address, int type) {
+    if (std::strlen(address) != 17)
+        return false;
+    unsigned octets[6];
+    char trailing;
+    if (std::sscanf(address, "%2x:%2x:%2x:%2x:%2x:%2x%c", &octets[5], &octets[4], &octets[3],
+                    &octets[2], &octets[1], &octets[0], &trailing) != 6)
+        return false;
+    peer.address.type = type;
+    for (size_t i = 0; i < 6; ++i)
+        peer.address.val[i] = static_cast<uint8_t>(octets[i]);
+    if (type == BLE_ADDR_RANDOM && (peer.address.val[5] & 0xc0) != 0xc0)
+        return false;
+    peer.configured = true;
+    return true;
+}
+void OnSync() {
+    if (ble_hs_util_ensure_addr(0) || ble_hs_id_infer_auto(0, &own_address_type))
+        return;
+    if (!callouts_initialized) {
+        ble_npl_callout_init(&retry, nimble_port_get_dflt_eventq(), Scan, nullptr);
+        for (auto& peer : peers)
+            ble_npl_callout_init(&peer.timeout, nimble_port_get_dflt_eventq(), Timeout, &peer);
+        callouts_initialized = true;
+    }
+    Scan(nullptr);
+}
+void OnReset(int reason) {
+    ESP_LOGE(kTag, "NimBLE reset %d; all positions released", reason);
+    connecting = false;
+    if (callouts_initialized)
+        ble_npl_callout_stop(&retry);
+    for (size_t side = 0; side < 2; ++side) {
+        input.Disconnect(side);
+        if (callouts_initialized)
+            ble_npl_callout_stop(&peers[side].timeout);
+        peers[side].connection = BLE_HS_CONN_HANDLE_NONE;
+        peers[side].phase = Phase::Idle;
+        ++peers[side].generation;
+    }
+}
+void Host(void*) {
+    nimble_port_run();
+    nimble_port_freertos_deinit();
+}
+}  // namespace
+
+void StartCubeSplitBench() {
+    Configure(peers[0], CONFIG_CUBE_SPLIT_LEFT_ADDRESS, CONFIG_CUBE_SPLIT_LEFT_ADDRESS_TYPE);
+    Configure(peers[1], CONFIG_CUBE_SPLIT_RIGHT_ADDRESS, CONFIG_CUBE_SPLIT_RIGHT_ADDRESS_TYPE);
+    if (peers[0].configured && peers[1].configured &&
+        std::memcmp(&peers[0].address, &peers[1].address, sizeof(ble_addr_t)) == 0) {
+        ESP_LOGE(kTag, "Same identity for both halves; bench disabled");
+        return;
+    }
+    ESP_LOGW(kTag, "Bench input only, USB/BLE HID OFF. Allowlist: left=%d right=%d",
+             peers[0].configured, peers[1].configured);
+    if (!peers[0].configured && !peers[1].configured) {
+        ESP_LOGW(kTag,
+                 "Configure fixed public/static identity addresses before testing; no automatic "
+                 "pairing");
+        return;
+    }
+    if (nimble_port_init() != ESP_OK) {
+        ESP_LOGE(kTag, "NimBLE init failed");
+        return;
+    }
+    ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+    ble_hs_cfg.sm_bonding = 1;
+    ble_hs_cfg.sm_mitm = 0;  // ZMK split uses encrypted L2, not a passkey UI.
+    ble_hs_cfg.sm_sc = 1;
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sync_cb = OnSync;
+    ble_hs_cfg.reset_cb = OnReset;
+    ble_store_config_init();
+    nimble_port_freertos_init(Host);
+}

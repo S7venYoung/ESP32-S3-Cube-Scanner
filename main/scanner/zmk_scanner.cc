@@ -4,6 +4,9 @@
 #include "application.h"
 #include "prospector_modifiers.h"
 #include "keyboard_status.h"
+#if CONFIG_CUBE_SPLIT_BENCH
+#include "cube_split_bench.h"
+#endif
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -197,6 +200,10 @@ KeyboardStatus GetKeyboardStatus() {
 }
 
 void StartZmkScanner() {
+#if CONFIG_CUBE_SPLIT_BENCH
+    StartCubeSplitBench();
+    return;
+#endif
     // Discovery is optional (it currently supplies names/RSSI, not keyboard
     // telemetry). Protect native HTTP/audio task stacks and DMA allocations.
     const auto caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;

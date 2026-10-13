@@ -1,6 +1,16 @@
-# Xingzhi Cube dongle — stage 1 (not runnable firmware)
+# Xingzhi Cube dongle — experimental input bench (HID off)
 
-Target: preserve XiaoZhi/Codex UI, receive two ZMK split peripherals, output keyboard input to a computer over USB **or** BLE. This folder is an isolated, host-tested core; it is deliberately not wired into production CMake or boot. No dongle `.bin` is available yet.
+Target: preserve XiaoZhi/Codex UI, receive two ZMK split peripherals, output keyboard input to a computer over USB **or** BLE. The host-tested core now has an opt-in NimBLE input-only adapter at `main/scanner/cube_split_bench.cc`. Normal Codex builds remain unchanged. The bench variant compiles the client but does not implement either computer HID output; it is not a usable keyboard dongle yet.
+
+## Stage 2 bench
+
+`xingzhi-cube-1.54tft-wifi-dongle-bench` enables a single NimBLE central and replaces advertisement-only scanning. It keeps XiaoZhi, themes, existing USB Serial/JTAG companion sync and Wi-Fi sync. This stage has no computer BLE peripheral, no TinyUSB and no HID injection. It uses fixed public/static peer identity addresses from `CONFIG_CUBE_SPLIT_LEFT_ADDRESS`/`RIGHT_ADDRESS` and their address types. Defaults are empty: the published compile-check artifact intentionally makes no connections until addresses are configured. RPA/rotating addresses are not supported in this bench. Do not auto-bind the first advertised device to a side.
+
+The client discovers the split service/position characteristic and its CCC by UUID, after verifying peer identity and link encryption. It enables notifications and reads an initial snapshot. New notifications supersede an older in-flight initial read. A side can set only positions belonging to its verified Velvet transform (61 total, 32 left and 29 right despite the inherited Velvet46 name). Invalid frames quarantine/terminate the connection and clear that side's state. Disconnect/reset clears state. Connection generations reject stale GATT completions. A 15-second handshake deadline and five-second peer retry cooldown bound failed pairing/discovery. Existing bonds are never automatically deleted; reset/re-pair must be explicit.
+
+Snapshots are handled on the NimBLE host event queue without an extra unbounded worker queue. The bench logs side and total pressed count, not typed content; it never sends a keyboard report. High-rate per-frame logging is for bring-up only and must be removed/rate-limited before latency testing. GATT output, UI telemetry and the real keymap are not yet wired to this adapter.
+
+Build: `bash scripts/build-cube-dongle-bench.sh` in ESP-IDF v6.1. For physical testing, provide the two identity addresses through the variant's `sdkconfig_append` or IDF configuration and rebuild; obtain addresses from a trusted device/USB diagnostic rather than assuming advertised names prove identity. Do not edit generated `sdkconfig` manually. Never flash keyboard peripherals before a recovery/working-central plan is ready.
 
 Keyboard baseline: `S7venYoung/zmk-elashvelvet`, `zmk-esp32-cube`, derived from `codex/zmk04-dya-Prospector-dongle` at `61d1e5d63e6f176058f4869a1c3ab2a8608ee746`. Its `cormoran/zmk main+dya` transport is not assumed to be identical to stock ZMK. Position UUID `00000001-0096-7107-c967-c5cfb1c2482a` carries exactly 16 bytes, LSB-first global key positions. Snapshot reads and notifications require an encrypted split connection. DYA relay UUID `00000007-...` is separate and is not implemented here.
 
@@ -10,8 +20,8 @@ USB/BLE routing sends release-all to the old endpoint before switching. Only one
 
 ## Still required before flashing
 
-1. Pin and build dedicated left/right Cube peripheral configurations; bind identities to sides, never pair automatically with arbitrary advertisements. Review ZMK security/bonding compatibility and reset/re-pair UX.
-2. Add a single NimBLE owner for scanner + split GATT client + computer HOGP server. Configure at least three concurrent connections. Register services before host start; do not initialize a second BLE host. Read an initial position snapshot after encrypted subscription, handle reconnect and service discovery by UUID (not fixed handles).
+1. Dedicated left/right Cube peripheral configurations are built with a pinned ZMK commit. Physically validate their position mapping, security/bonds and reset/re-pair UX against this bench.
+2. Extend the bench's single NimBLE owner to include scanner telemetry + computer HOGP server; the current variant reserves three connections but only connects two halves. Register server services before host start; do not initialize a second BLE host. Add private-address resolution before claiming general ZMK pairing support.
 3. Import the real physical-layout mapping and supported bindings; explicitly reject unsupported behavior types rather than silently substituting keys. Preserve cross-hand semantics before claiming ZMK compatibility.
 4. Replace native USB Serial/JTAG sync with TinyUSB composite HID + CDC. The same GPIO19/20 cannot expose both controllers as concurrent separate devices. Rework Cube serial sync to CDC while preserving `CUBE-CODEX/2`, PAIR and Wi-Fi APIs. Keep a documented ROM-download recovery path.
 5. Implement BLE computer pairing, HID report map, CCC subscription/security, indicators, suspend/resume and explicit USB/BLE selection. Losing a host link must reconcile held state and releases before reconnect.
@@ -27,4 +37,4 @@ clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
 
 Wire format source: https://github.com/cormoran/zmk/blob/main%2Bdya/app/src/split/bluetooth/service.c
 
-Status: state merge/key processing/router tested on host; no BLE link, USB driver, complete keyboard behavior or hardware verification. Existing production firmware is unchanged.
+Status: state merge/key processing/router and Velvet ownership tested on host; opt-in GATT input adapter awaiting physical BLE verification; no USB/HOGP output, complete keyboard behavior or hardware validation. Existing production firmware is unchanged.

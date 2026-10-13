@@ -8,12 +8,26 @@ BOARD = ROOT / 'main/boards/nologo/xingzhi-cube-1.54tft-wifi'
 class NologoCubePortTest(unittest.TestCase):
     def test_stock_and_custom_variants(self):
         config = json.loads((BOARD / 'config.json').read_text())
-        stock, custom = config['builds']
+        variants = {item['name']: item for item in config['builds']}
+        stock = variants['xingzhi-cube-1.54tft-wifi']
+        custom = variants['xingzhi-cube-1.54tft-wifi-codex']
         self.assertEqual(stock['sdkconfig_append'], [])
         self.assertEqual(custom['name'], 'xingzhi-cube-1.54tft-wifi-codex')
         self.assertIn('CONFIG_ZMK_SCANNER_MODE=y', custom['sdkconfig_append'])
         self.assertIn('CONFIG_ESP_CONSOLE_UART_DEFAULT=y', custom['sdkconfig_append'])
         self.assertIn('CONFIG_BT_NIMBLE_ENABLED=y', custom['sdkconfig_append'])
+        self.assertIn('CONFIG_BT_NIMBLE_ROLE_CENTRAL=n', custom['sdkconfig_append'])
+
+    def test_split_bench_is_opt_in(self):
+        variants = json.loads((BOARD / 'config.json').read_text())['builds']
+        bench = next(v for v in variants if v['name'].endswith('-dongle-bench'))
+        self.assertIn('CONFIG_CUBE_SPLIT_BENCH=y', bench['sdkconfig_append'])
+        self.assertIn('CONFIG_BT_NIMBLE_ROLE_CENTRAL=y', bench['sdkconfig_append'])
+        self.assertIn('CONFIG_BT_NIMBLE_NVS_PERSIST=y', bench['sdkconfig_append'])
+        self.assertIn('CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3', bench['sdkconfig_append'])
+        for variant in variants:
+            if variant is not bench:
+                self.assertNotIn('CONFIG_CUBE_SPLIT_BENCH=y', variant['sdkconfig_append'])
 
     def test_board_and_power_mapping(self):
         source = (BOARD / 'xingzhi-cube-1.54tft-wifi.cc').read_text()

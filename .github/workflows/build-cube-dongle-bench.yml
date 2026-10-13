@@ -1,0 +1,42 @@
+name: Build Cube split input bench
+on:
+  push:
+    branches: [codex/xingzhi-cube-dongle]
+    paths:
+      - 'main/**'
+      - 'scripts/build-cube-dongle-bench.sh'
+      - 'experimental/cube_dongle/**'
+      - '.github/workflows/build-cube-dongle-bench.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build opt-in bench variant, HID disabled
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          path: .
+          command: bash scripts/build-cube-dongle-bench.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cube-Split-Bench-NOT-daily-firmware
+          path: |
+            build/merged-binary.bin
+            build/xingzhi_cube_split_bench.bin
+            build/xiaozhi.bin
+            build/generated_assets.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+            build/flash_args
+            build/flasher_args.json
+            build/sdkconfig
+            build/SHA256SUMS
+            build/BENCH-NOT-FOR-DAILY-USE.md
+          if-no-files-found: error
