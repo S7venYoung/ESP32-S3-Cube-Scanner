@@ -8,11 +8,19 @@ Keyboard ID1 is an eight-byte, six-key HID report with modifiers; seven held ord
 
 The diagnostic client also supports this candidate. If explicit binding arguments are supplied, it disables HID before writing identities; read-only status does not change output. Binding acknowledgements say `HID-MODE-UNCHANGED` rather than falsely claiming an HID-off build. A disabled candidate reports `HID-OFF` in its status response. The host-test suite does not constitute hardware validation.
 
+## Fight theme
+
+The existing Fight theme remains the default for a fresh configuration; a saved theme is preserved. Long-press Volume Down cycles themes. Dojo, fighter sprites, idle animation, CODEX/VS/TODAY artwork, mirrored bars and macOS modifier symbols retain the existing design. No visible WPM module is added.
+
+Encrypted split position notifications now feed independent left/right typing activity. Only new ordinary key presses count; duplicate snapshots, modifiers, layer keys and keys already held at reconnect do not. A bounded five-second window drives each fighter's attack intensity. After 750 ms without a new press its activity becomes zero; VS/TODAY return after the existing 1.5-second idle hold. Modifier highlights are polled by the LVGL timer, not drawn from the BLE callback.
+
+The lower energy bars use each connected half's standard BLE Battery Level characteristic (0x2A19), read every 30 seconds. Missing, disconnected or stale readings remain unknown/empty rather than inventing 0% or 100%. A valid 0% is retained. Layers and modifier state also feed the existing keyboard status getter. This is actual connected-split telemetry, not the scanner advertisement protocol; both halves need the Cube peripheral firmware and explicit identity binding. No additional keyboard telemetry change is required.
+
 ## Not implemented / not verified
 
 - Computer Bluetooth HID output and BT_SEL/BT_CLR/BT_CLR_ALL actions are **not** implemented in this USB-only candidate. These actions are recognized separately and logged; they are not silently mapped to keyboard usages.
 - The original cross-hand bootloader combo, runtime keymap/macro/combos, mouse, host LED propagation and NKRO are not implemented. This is not a complete ZMK behavior-engine port.
-- Dongle position data is not yet fed into the existing theme's layer/WPM/battery telemetry. Existing scanner advertising is replaced by the connected client in this variant.
+- Fight theme integration is implemented but has not been visually or physically verified on the Cube. Existing scanner advertising is replaced by the connected client in this variant.
 - No physical typing, latency, USB suspend/recovery, CDC dual synchronization, left/right disconnect, Wi-Fi/voice coexistence or battery-only behavior has been verified.
 - The board's VBUS sensing circuitry has not been verified. The candidate uses the default bus-powered USB PHY/configuration, not a claimed self-powered compliance implementation. Do not infer USB electrical compliance while running on the battery alone.
 

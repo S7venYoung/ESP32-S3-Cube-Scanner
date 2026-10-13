@@ -124,6 +124,17 @@ public:
         return bits;
     }
     uint16_t Actions() const { return actions_; }
+    Binding PressedBinding(size_t position) const {
+        return position < Positions && pressed_[position] ? latched_[position] : Binding{};
+    }
+    size_t ActiveLayer() const {
+        size_t layer = 0;
+        for (size_t p = 0; p < Positions; ++p)
+            if (pressed_[p] && latched_[p].kind == Kind::MomentaryLayer &&
+                latched_[p].value < Layers && latched_[p].value > layer)
+                layer = latched_[p].value;
+        return layer;
+    }
 
 private:
     static bool Down(const SplitState::Snapshot& snapshot, size_t position) {

@@ -1,6 +1,7 @@
 #include "cube_split_bench.h"
-#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#include "../../experimental/cube_dongle/typing_activity.h"
 #include "../../experimental/cube_dongle/velvet_keymap.h"
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
 #include "cube_usb_dongle.h"
 #endif
 #include "../../experimental/cube_dongle/peer_binding.h"
@@ -18,9 +19,11 @@
 #include <nimble/nimble_port_freertos.h>
 #include <nvs.h>
 #include <os/os_mbuf.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 
 extern "C" void ble_store_config_init(void);
 
@@ -51,22 +54,28 @@ struct Peer {
     bool notified_during_read = false;
     int64_t retry_after = 0;
     ble_npl_callout timeout{};
+    cube_dongle::TypingActivity typing;
+    int battery = -1;
+    int64_t battery_seen = -1, battery_next = 0;
+    bool battery_pending = false;
 };
 Peer peers[2];
 cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
-#if CONFIG_CUBE_USB_DONGLE_OUTPUT
 cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 void PublishKeyboard() {
     keyboard.Apply(input.Combined());
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
     CubeUsbSubmit({keyboard.Report(), keyboard.MediaReport()});
     if (keyboard.Actions())
         ESP_LOGW(kTag, "Host BLE profile command unsupported by USB-only candidate: %u",
                  keyboard.Actions());
-}
-#else
-void PublishKeyboard() {}
 #endif
+}
 ble_npl_callout retry;
+ble_npl_callout telemetry_timer;
+std::mutex telemetry_mutex;
+FightTelemetry fight_cache;
+KeyboardStatus keyboard_cache;
 bool connecting = false;
 bool callouts_initialized = false;
 uint8_t own_address_type = 0;
@@ -85,6 +94,33 @@ void PublishStatus() {
             word |= 1u << (side + 2);
     }
     status_word.store(word, std::memory_order_relaxed);
+    const auto now = esp_timer_get_time();
+    FightTelemetry fight;
+    const bool left = peers[0].phase == Phase::Ready, right = peers[1].phase == Phase::Ready;
+    fight.online = left || right;
+    fight.left_wpm = left ? peers[0].typing.Wpm(now / 1000) : -1;
+    fight.right_wpm = right ? peers[1].typing.Wpm(now / 1000) : -1;
+    fight.left_battery =
+        left && peers[0].battery_seen >= 0 && now - peers[0].battery_seen < 90000000
+            ? peers[0].battery
+            : -1;
+    fight.right_battery =
+        right && peers[1].battery_seen >= 0 && now - peers[1].battery_seen < 90000000
+            ? peers[1].battery
+            : -1;
+    fight.modifiers = cube_dongle::UiModifiers(keyboard.Report()[0]);
+    KeyboardStatus status;
+    status.online = fight.online;
+    const char* layers[] = {"BASE", "NVA", "SYS"};
+    std::snprintf(status.layer, sizeof(status.layer), "%s", layers[keyboard.ActiveLayer()]);
+    status.wpm = fight.online ? std::max(0, fight.left_wpm) + std::max(0, fight.right_wpm) : -1;
+    status.modifiers = fight.modifiers;
+    status.left_battery = fight.left_battery;
+    status.right_battery = fight.right_battery;
+    // Split links are not the computer's Bluetooth HID connection.
+    std::lock_guard<std::mutex> lock(telemetry_mutex);
+    fight_cache = fight;
+    keyboard_cache = status;
 }
 
 int OnGap(ble_gap_event* event, void* arg);
@@ -109,6 +145,9 @@ bool Encrypted(const Peer& peer) {
 void Fail(Peer& peer, const char* reason) {
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
     input.Disconnect(Side(peer));
+    peer.typing.Reset();
+    peer.battery = -1;
+    peer.battery_seen = -1;
     PublishKeyboard();
     peer.phase = Phase::Closing;
     PublishStatus();
@@ -136,14 +175,48 @@ bool Snapshot(Peer& peer, os_mbuf* mbuf) {
         return false;
     const auto state = input.Combined();
     PublishKeyboard();
+    cube_dongle::SplitState::Snapshot owned{};
+    std::memcpy(owned.data(), bytes, sizeof(bytes));
+    peer.typing.Observe(owned, keyboard, esp_timer_get_time() / 1000);
     PublishStatus();
     unsigned pressed = 0;
     for (uint8_t byte : state)
         for (; byte; byte &= byte - 1)
             ++pressed;
-    ESP_LOGI(kTag, "%s snapshot accepted, total pressed=%u (HID OFF)",
-             Side(peer) ? "right" : "left", pressed);
+    ESP_LOGD(kTag, "%s snapshot accepted, total pressed=%u", Side(peer) ? "right" : "left",
+             pressed);
     return true;
+}
+int OnBattery(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Ready)
+        return 0;
+    uint8_t value;
+    if (!error->status && attr && attr->om && OS_MBUF_PKTLEN(attr->om) == 1 &&
+        !os_mbuf_copydata(attr->om, 0, 1, &value) && value <= 100) {
+        peer->battery = value;
+        peer->battery_seen = esp_timer_get_time();
+        PublishStatus();
+    }
+    if (error->status)
+        peer->battery_pending = false;
+    return 0;
+}
+void TelemetryTick(ble_npl_event*) {
+    const auto now = esp_timer_get_time();
+    static const ble_uuid16_t battery_uuid = BLE_UUID16_INIT(0x2a19);
+    for (size_t side = 0; side < 2; ++side) {
+        auto& peer = peers[side];
+        if (peer.phase == Phase::Ready && !peer.battery_pending && now >= peer.battery_next) {
+            peer.battery_next = now + 30000000;
+            peer.battery_pending = true;
+            if (ble_gattc_read_by_uuid(peer.connection, 1, 0xffff, &battery_uuid.u, OnBattery,
+                                       Cookie(side)))
+                peer.battery_pending = false;
+        }
+    }
+    PublishStatus();
+    ble_npl_callout_reset(&telemetry_timer, ble_npl_time_ms_to_ticks32(100));
 }
 int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void* arg) {
     Peer* peer = Current(conn, arg);
@@ -310,6 +383,11 @@ int OnGap(ble_gap_event* event, void* arg) {
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                peer.connection == event->disconnect.conn.conn_handle) {
         input.Disconnect(cookie & 1);
+        peer.typing.Reset();
+        peer.battery = -1;
+        peer.battery_seen = -1;
+        peer.battery_next = 0;
+        peer.battery_pending = false;
         PublishKeyboard();
         ble_npl_callout_stop(&peer.timeout);
         peer.connection = BLE_HS_CONN_HANDLE_NONE;
@@ -387,27 +465,37 @@ void OnSync() {
         return;
     if (!callouts_initialized) {
         ble_npl_callout_init(&retry, nimble_port_get_dflt_eventq(), Scan, nullptr);
+        ble_npl_callout_init(&telemetry_timer, nimble_port_get_dflt_eventq(), TelemetryTick,
+                             nullptr);
         for (auto& peer : peers)
             ble_npl_callout_init(&peer.timeout, nimble_port_get_dflt_eventq(), Timeout, &peer);
         callouts_initialized = true;
     }
+    TelemetryTick(nullptr);
     Scan(nullptr);
 }
 void OnReset(int reason) {
     ESP_LOGE(kTag, "NimBLE reset %d; all positions released", reason);
     connecting = false;
-    if (callouts_initialized)
+    if (callouts_initialized) {
         ble_npl_callout_stop(&retry);
+        ble_npl_callout_stop(&telemetry_timer);
+    }
     for (size_t side = 0; side < 2; ++side) {
         input.Disconnect(side);
+        peers[side].typing.Reset();
+        peers[side].battery = -1;
+        peers[side].battery_seen = -1;
+        peers[side].battery_pending = false;
+        peers[side].battery_next = 0;
         if (callouts_initialized)
             ble_npl_callout_stop(&peers[side].timeout);
         peers[side].connection = BLE_HS_CONN_HANDLE_NONE;
         peers[side].phase = Phase::Idle;
         ++peers[side].generation;
     }
-    PublishStatus();
     PublishKeyboard();
+    PublishStatus();
 }
 void Host(void*) {
     nimble_port_run();
@@ -455,6 +543,14 @@ void StartCubeSplitBench() {
 }
 
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
+FightTelemetry CubeSplitFightTelemetry() {
+    std::lock_guard<std::mutex> lock(telemetry_mutex);
+    return fight_cache;
+}
+KeyboardStatus CubeSplitKeyboardStatus() {
+    std::lock_guard<std::mutex> lock(telemetry_mutex);
+    return keyboard_cache;
+}
 
 std::string CubeSplitBenchBind(const std::string& command) {
     cube_dongle::BindRequest request;

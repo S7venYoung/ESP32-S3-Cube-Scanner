@@ -20,6 +20,8 @@ struct Scene {
     lv_timer_t* timer = nullptr;
     ArcadeMotion motion[2];
     int shown_pose[2] = {-1,-1};
+    int shown_modifiers = -1;
+    int shown_battery[2] = {-2,-2};
 };
 lv_obj_t* Box(lv_obj_t* p,int x,int y,int w,int h,uint32_t color,int radius=0) {
     auto* o=lv_obj_create(p);lv_obj_remove_style_all(o);lv_obj_set_pos(o,x,y);lv_obj_set_size(o,w,h);
@@ -70,6 +72,11 @@ void Tick(Scene& s) {
         return;
     }
     const auto f=GetFightTelemetry();
+    ArcadeSetModifiers(s.root,f.online?f.modifiers:0);
+    const int battery[]={f.online?f.left_battery:-1,f.online?f.right_battery:-1};
+    for(int i=0;i<2;++i)if(battery[i]!=s.shown_battery[i]) {
+        ArcadeEnergySet(s.rage[i],battery[i],i==1);s.shown_battery[i]=battery[i];
+    }
     const bool hidden=s.activity.Step(lv_tick_get(),f.online,f.left_wpm,f.right_wpm);
     for(auto* overlay:{s.versus,s.today,s.total}) {
         if(hidden)lv_obj_add_flag(overlay,LV_OBJ_FLAG_HIDDEN);
@@ -160,6 +167,7 @@ void ArcadeSetBattery(lv_obj_t* root,const char* text) {
 }
 void ArcadeSetModifiers(lv_obj_t* root,uint8_t modifiers) {
     if(!root)return;auto& s=*static_cast<Scene*>(lv_obj_get_user_data(root));
+    if(s.shown_modifiers==modifiers)return;s.shown_modifiers=modifiers;
     for(int i=0;i<4;++i){const bool active=modifiers&(1u<<i);lv_obj_set_style_bg_color(s.keys[i],lv_color_hex(active?red:ink),0);ArcadeTextColor(s.symbols[i],white);}
 }
 void ArcadeRefresh(lv_obj_t* root) {

@@ -3,12 +3,43 @@
 #include "peer_binding.h"
 #include "report_queue.h"
 #include "split_state.h"
+#include "typing_activity.h"
 #include "velvet_keymap.h"
 #include "velvet_positions.h"
 
 using namespace cube_dongle;
 
 int main() {
+    KeyboardState<61, 3> activity_keyboard(VelvetKeymap());
+    TypingActivity activity;
+    SplitState::Snapshot typing{};
+    typing[13 / 8] |= 1u << (13 % 8);
+    activity_keyboard.Apply(typing);
+    activity.Observe(typing, activity_keyboard, 0);
+    assert(activity.Wpm(0) == 0);  // reconnect with a held Q is not a new press
+    typing = {};
+    activity_keyboard.Apply(typing);
+    activity.Observe(typing, activity_keyboard, 100);
+    typing[13 / 8] |= 1u << (13 % 8);
+    activity_keyboard.Apply(typing);
+    activity.Observe(typing, activity_keyboard, 200);
+    assert(activity.Wpm(200) == 12);
+    activity.Observe(typing, activity_keyboard, 300);
+    assert(activity.Wpm(300) == 12);   // duplicate snapshot adds no typing
+    typing[25 / 8] |= 1u << (25 % 8);  // mac Command, not a word
+    activity_keyboard.Apply(typing);
+    activity.Observe(typing, activity_keyboard, 400);
+    assert(activity.Wpm(400) == 12);
+    assert(UiModifiers(activity_keyboard.Report()[0]) == 4);
+    assert(activity.Wpm(950) == 0);  // idle even if Q remains held
+    activity.Reset();
+    activity.Observe(typing, activity_keyboard, 10000);
+    assert(activity.Wpm(10000) == 0);
+    assert(UiModifiers(0xff) == 15 && UiModifiers(0) == 0);
+    assert(UiModifiers(0x10) == 1 && UiModifiers(0x40) == 2 && UiModifiers(0x20) == 8);
+    TypingActivity other_hand;
+    other_hand.Observe({}, activity_keyboard, 10000);
+    assert(other_hand.Wpm(10000) == 0);  // independent left/right histories
     KeyboardState<61, 3> real_keyboard(VelvetKeymap());
     SplitState::Snapshot real_positions{};
     auto down = [&](size_t p) { real_positions[p / 8] |= 1u << (p % 8); };
@@ -22,17 +53,20 @@ int main() {
     real_keyboard.Apply(real_positions);
     assert(real_keyboard.Report() == KeyboardReport{});
     assert(real_keyboard.MediaReport() == 3);
+    assert(real_keyboard.ActiveLayer() == 1);
     real_positions = {};
     down(55);  // Space
     down(54);  // momentary SYS
     down(47);  // BT_SEL 2 in SYS
     real_keyboard.Apply(real_positions);
     assert(real_keyboard.Actions() == 4);
+    assert(real_keyboard.ActiveLayer() == 2);
     assert(real_keyboard.Report()[2] == 44);
     real_keyboard.Apply(real_positions);
     assert(real_keyboard.Actions() == 0);  // no repeated destructive command on a snapshot
     real_keyboard.Apply({});
     assert(real_keyboard.Report() == KeyboardReport{} && real_keyboard.MediaReport() == 0);
+    assert(real_keyboard.ActiveLayer() == 0);
 
     ReportQueue<2> queue;
     ReportFrame a, b;

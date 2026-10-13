@@ -188,12 +188,18 @@ void HostTask(void*) {
 }  // namespace
 
 FightTelemetry GetFightTelemetry() {
+#if CONFIG_CUBE_SPLIT_BENCH
+    return CubeSplitFightTelemetry();
+#endif
     std::lock_guard<std::mutex> lock(fight_mutex);
     if (fight_seen_us<0 || esp_timer_get_time()-fight_seen_us>3000000) return {};
     return fight_data;
 }
 
 KeyboardStatus GetKeyboardStatus() {
+#if CONFIG_CUBE_SPLIT_BENCH
+    return CubeSplitKeyboardStatus();
+#endif
     std::lock_guard<std::mutex> lock(fight_mutex);
     if (keyboard_seen_us < 0 || esp_timer_get_time() - keyboard_seen_us > 10000000) return {};
     return keyboard_data;

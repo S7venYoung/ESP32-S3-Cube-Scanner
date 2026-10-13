@@ -1,9 +1,13 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include "fight_telemetry.h"
+#include "keyboard_status.h"
 
-// Owns the NimBLE host only in the opt-in bench build. Never emits HID input.
+// Owns NimBLE only in opt-in split-client builds. USB output is separately gated.
 void StartCubeSplitBench();
 // Atomic diagnostic: bit0/1 configured L/R, bit2/3 ready L/R, bits8..15 pressed.
 uint32_t CubeSplitBenchStatus();
 std::string CubeSplitBenchBind(const std::string& command);
+FightTelemetry CubeSplitFightTelemetry();
+KeyboardStatus CubeSplitKeyboardStatus();
