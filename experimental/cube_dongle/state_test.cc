@@ -1,11 +1,32 @@
 #include <cassert>
 #include <vector>
+#include "peer_binding.h"
 #include "split_state.h"
 #include "velvet_positions.h"
 
 using namespace cube_dongle;
 
 int main() {
+    PeerBinding identity;
+    assert(ParseIdentity("C1:23:45:67:89:AB", 1, identity));
+    assert(identity.bytes[0] == 0xab && identity.bytes[5] == 0xc1);
+    const auto unchanged = identity.bytes;
+    assert(!ParseIdentity("81:23:45:67:89:AB", 1, identity));
+    assert(!ParseIdentity("00:00:00:00:00:00", 0, identity));
+    assert(!ParseIdentity("FF:FF:FF:FF:FF:FF", 1, identity));
+    assert(!ParseIdentity("C1:23:45:67:89:GG", 1, identity));
+    assert(!ParseIdentity("C1:23:45:67:89:ABx", 1, identity));
+    assert(!ParseIdentity("C1:23:45:67:89:AB", 2, identity));
+    assert(identity.bytes == unchanged);
+    BindRequest bind;
+    assert(ParseBindCommand("DONGLE BIND L C1:23:45:67:89:AB 1", bind));
+    assert(bind.side == 0 && bind.stored == "C1:23:45:67:89:AB 1");
+    assert(ParseBindCommand("DONGLE BIND R 01:23:45:67:89:AB 0", bind));
+    assert(bind.side == 1 && bind.identity.type == 0);
+    assert(!ParseBindCommand("DONGLE BIND R 01:23:45:67:89:AB 1", bind));
+    assert(!ParseBindCommand("DONGLE BIND X C1:23:45:67:89:AB 1", bind));
+    assert(!ParseBindCommand("DONGLE BIND L C1:23:45:67:89:AB 1 extra", bind));
+    assert(bind.side == 1);
     constexpr auto velvet = VelvetOwnership();
     unsigned left_count = 0, right_count = 0;
     for (size_t p = 0; p < 128; ++p) {

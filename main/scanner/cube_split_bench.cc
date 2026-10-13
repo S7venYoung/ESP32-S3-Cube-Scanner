@@ -1,4 +1,5 @@
 #include "cube_split_bench.h"
+#include "../../experimental/cube_dongle/peer_binding.h"
 #include "../../experimental/cube_dongle/velvet_positions.h"
 
 #include <esp_log.h>
@@ -11,6 +12,7 @@
 #include <host/util/util.h>
 #include <nimble/nimble_port.h>
 #include <nimble/nimble_port_freertos.h>
+#include <nvs.h>
 #include <os/os_mbuf.h>
 #include <atomic>
 #include <cstdio>
@@ -334,20 +336,32 @@ void Scan(ble_npl_event*) {
         Retry();
 }
 bool Configure(Peer& peer, const char* address, int type) {
-    if (std::strlen(address) != 17)
-        return false;
-    unsigned octets[6];
-    char trailing;
-    if (std::sscanf(address, "%2x:%2x:%2x:%2x:%2x:%2x%c", &octets[5], &octets[4], &octets[3],
-                    &octets[2], &octets[1], &octets[0], &trailing) != 6)
+    cube_dongle::PeerBinding binding;
+    if (!cube_dongle::ParseIdentity(address, type, binding))
         return false;
     peer.address.type = type;
-    for (size_t i = 0; i < 6; ++i)
-        peer.address.val[i] = static_cast<uint8_t>(octets[i]);
-    if (type == BLE_ADDR_RANDOM && (peer.address.val[5] & 0xc0) != 0xc0)
-        return false;
+    std::memcpy(peer.address.val, binding.bytes.data(), 6);
     peer.configured = true;
     return true;
+}
+void LoadBinding(Peer& peer, const char* key, const char* fallback, int fallback_type) {
+    nvs_handle_t handle;
+    char value[20];
+    size_t size = sizeof(value);
+    if (nvs_open("cube_split", NVS_READONLY, &handle) == ESP_OK) {
+        const int rc = nvs_get_str(handle, key, value, &size);
+        nvs_close(handle);
+        if (rc == ESP_OK) {
+            if (size == 20 && value[17] == ' ' && (value[18] == '0' || value[18] == '1')) {
+                value[17] = 0;
+                Configure(peer, value, value[18] - '0');
+            }
+            return;  // Invalid persisted identity never silently falls back to another peer.
+        }
+        if (rc != ESP_ERR_NVS_NOT_FOUND)
+            return;
+    }
+    Configure(peer, fallback, fallback_type);
 }
 void OnSync() {
     if (ble_hs_util_ensure_addr(0) || ble_hs_id_infer_auto(0, &own_address_type))
@@ -382,8 +396,14 @@ void Host(void*) {
 }  // namespace
 
 void StartCubeSplitBench() {
-    Configure(peers[0], CONFIG_CUBE_SPLIT_LEFT_ADDRESS, CONFIG_CUBE_SPLIT_LEFT_ADDRESS_TYPE);
-    Configure(peers[1], CONFIG_CUBE_SPLIT_RIGHT_ADDRESS, CONFIG_CUBE_SPLIT_RIGHT_ADDRESS_TYPE);
+    static bool started = false;
+    if (started)
+        return;
+    started = true;
+    LoadBinding(peers[0], "left", CONFIG_CUBE_SPLIT_LEFT_ADDRESS,
+                CONFIG_CUBE_SPLIT_LEFT_ADDRESS_TYPE);
+    LoadBinding(peers[1], "right", CONFIG_CUBE_SPLIT_RIGHT_ADDRESS,
+                CONFIG_CUBE_SPLIT_RIGHT_ADDRESS_TYPE);
     PublishStatus();
     if (peers[0].configured && peers[1].configured &&
         std::memcmp(&peers[0].address, &peers[1].address, sizeof(ble_addr_t)) == 0) {
@@ -415,3 +435,35 @@ void StartCubeSplitBench() {
 }
 
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
+
+std::string CubeSplitBenchBind(const std::string& command) {
+    cube_dongle::BindRequest request;
+    if (!cube_dongle::ParseBindCommand(command, request))
+        return "ERR INVALID-BIND";
+    nvs_handle_t handle;
+    if (nvs_open("cube_split", NVS_READWRITE, &handle) != ESP_OK)
+        return "ERR NVS-OPEN";
+    char other[20];
+    size_t size = sizeof(other);
+    const int rc = nvs_get_str(handle, request.side ? "left" : "right", other, &size);
+    cube_dongle::PeerBinding other_identity;
+    bool duplicate = false;
+    if (rc == ESP_OK && size == 20 && other[17] == ' ') {
+        other[17] = 0;
+        duplicate = cube_dongle::ParseIdentity(other, other[18] - '0', other_identity) &&
+                    request.identity.bytes == other_identity.bytes &&
+                    request.identity.type == other_identity.type;
+    }
+    if (duplicate) {
+        nvs_close(handle);
+        return "ERR SAME-PEER";
+    }
+    if (rc != ESP_OK && rc != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        return "ERR NVS-READ";
+    }
+    const int write = nvs_set_str(handle, request.side ? "right" : "left", request.stored.c_str());
+    const int commit = write == ESP_OK ? nvs_commit(handle) : write;
+    nvs_close(handle);
+    return commit == ESP_OK ? "CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-OFF" : "ERR NVS-WRITE";
+}

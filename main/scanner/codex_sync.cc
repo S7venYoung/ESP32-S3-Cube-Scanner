@@ -123,6 +123,7 @@ void SyncTask(void*) {
                     else if (line == "PAIR") Reply("CUBE-PAIR " + IpAddress() + " " + token);
 #if CONFIG_CUBE_SPLIT_BENCH
                     else if (line == "DONGLE") Reply("CUBE-SPLIT-BENCH/1 " + std::to_string(CubeSplitBenchStatus()) + " HID-OFF");
+                    else if (line.rfind("DONGLE BIND ", 0) == 0) Reply(CubeSplitBenchBind(line));
 #endif
                     else if (line.rfind("CODEX", 0) == 0) Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
                 }

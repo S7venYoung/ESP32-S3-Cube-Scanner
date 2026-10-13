@@ -180,15 +180,20 @@ public:
 #if CONFIG_ZMK_SCANNER_MODE
     void StartNetwork() override {
         StartCodexSync();
+#if CONFIG_CUBE_SPLIT_BENCH
+        StartZmkScanner();  // Input bench must not depend on a Wi-Fi connection.
+#endif
         WifiBoard::StartNetwork();
     }
     void SetNetworkEventCallback(NetworkEventCallback callback) override {
         WifiBoard::SetNetworkEventCallback([callback](NetworkEvent event,const std::string& data){
             if(callback)callback(event,data);
+#if !CONFIG_CUBE_SPLIT_BENCH
             if(event==NetworkEvent::Connected)Application::GetInstance().Schedule([](){
                 static bool started=false;
                 if(!started){started=true;StartZmkScanner();}
             });
+#endif
         });
     }
 #endif
