@@ -72,6 +72,8 @@ const char* strings[] = {language,      "Xingzhi Cube",    "Cube ZMK Dongle Cand
                          serial_number, "Cube Codex Sync", "Cube Keyboard + Media"};
 std::mutex mutex;
 cube_dongle::ReportQueue<64> frames;
+portMUX_TYPE cache_mux = portMUX_INITIALIZER_UNLOCKED;
+cube_dongle::ReportFrame report_cache;
 uint32_t revision = 0;
 bool enabled = true;
 std::atomic<bool> completed{false};
@@ -82,6 +84,9 @@ void OnUsbEvent(tinyusb_event_t*, void*) { ++link_epoch; }
 void ReleaseLocked() {
     frames.ReleaseAndInhibit();
     ++revision;
+    portENTER_CRITICAL(&cache_mux);
+    report_cache = {};
+    portEXIT_CRITICAL(&cache_mux);
 }
 void Worker(void*) {
     bool inflight = false;
@@ -141,8 +146,10 @@ extern "C" uint16_t tud_hid_get_report_cb(uint8_t, uint8_t id, hid_report_type_t
                                           uint8_t* buffer, uint16_t max) {
     if (type != HID_REPORT_TYPE_INPUT)
         return 0;
-    std::lock_guard<std::mutex> lock(mutex);
-    const auto frame = frames.Latest();
+    cube_dongle::ReportFrame frame;
+    portENTER_CRITICAL(&cache_mux);
+    frame = report_cache;
+    portEXIT_CRITICAL(&cache_mux);
     const uint16_t size = (id == 0 || id == 1) ? 8 : id == 2 ? 1 : 0;
     if (!size || max < size)
         return 0;
@@ -213,6 +220,9 @@ void CubeUsbSubmit(const cube_dongle::ReportFrame& frame) {
         ++revision;
         ESP_LOGW(kTag, "Report queue overflow: release and wait for neutral input");
     }
+    portENTER_CRITICAL(&cache_mux);
+    report_cache = frames.Latest();
+    portEXIT_CRITICAL(&cache_mux);
 }
 void CubeUsbEnable(bool value) {
     std::lock_guard<std::mutex> lock(mutex);
