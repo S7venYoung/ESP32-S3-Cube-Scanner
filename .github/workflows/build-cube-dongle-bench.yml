@@ -16,6 +16,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Apply inherited integration formatting before IDF compile
+        run: |
+          python3 -m venv /tmp/cube-format-env
+          /tmp/cube-format-env/bin/pip install clang-format==21.1.8
+          /tmp/cube-format-env/bin/clang-format -i main/scanner/*.cc main/scanner/*.h
+          /tmp/cube-format-env/bin/clang-format -i main/boards/nologo/xingzhi-cube-1.54tft-wifi/xingzhi-cube-1.54tft-wifi.cc main/boards/nologo/xingzhi-cube-1.54tft-wifi/power_manager.h
       - name: Build opt-in bench variant, HID disabled
         uses: espressif/esp-idf-ci-action@v1
         with:

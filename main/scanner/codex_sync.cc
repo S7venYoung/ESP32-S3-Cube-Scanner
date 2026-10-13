@@ -1,4 +1,7 @@
 #include "codex_metrics.h"
+#if CONFIG_CUBE_SPLIT_BENCH
+#include "cube_split_bench.h"
+#endif
 #include "settings.h"
 #include <driver/uart.h>
 #if CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI
@@ -118,6 +121,9 @@ void SyncTask(void*) {
                     if (line == "PING") Reply("PROSPECTOR-SCANNER/1");
                     else if (line == "CAPS") Reply("CUBE-CODEX/2");
                     else if (line == "PAIR") Reply("CUBE-PAIR " + IpAddress() + " " + token);
+#if CONFIG_CUBE_SPLIT_BENCH
+                    else if (line == "DONGLE") Reply("CUBE-SPLIT-BENCH/1 " + std::to_string(CubeSplitBenchStatus()) + " HID-OFF");
+#endif
                     else if (line.rfind("CODEX", 0) == 0) Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
                 }
                 line.clear(); overflow = false;

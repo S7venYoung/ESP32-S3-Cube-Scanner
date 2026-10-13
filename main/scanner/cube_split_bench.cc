@@ -12,6 +12,7 @@
 #include <nimble/nimble_port.h>
 #include <nimble/nimble_port_freertos.h>
 #include <os/os_mbuf.h>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
@@ -51,6 +52,22 @@ ble_npl_callout retry;
 bool connecting = false;
 bool callouts_initialized = false;
 uint8_t own_address_type = 0;
+std::atomic<uint32_t> status_word{0};
+
+void PublishStatus() {
+    unsigned pressed = 0;
+    for (uint8_t byte : input.Combined())
+        for (; byte; byte &= byte - 1)
+            ++pressed;
+    uint32_t word = pressed << 8;
+    for (size_t side = 0; side < 2; ++side) {
+        if (peers[side].configured)
+            word |= 1u << side;
+        if (peers[side].phase == Phase::Ready)
+            word |= 1u << (side + 2);
+    }
+    status_word.store(word, std::memory_order_relaxed);
+}
 
 int OnGap(ble_gap_event* event, void* arg);
 void Scan(ble_npl_event*);
@@ -75,6 +92,7 @@ void Fail(Peer& peer, const char* reason) {
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
     input.Disconnect(Side(peer));
     peer.phase = Phase::Closing;
+    PublishStatus();
     ble_npl_callout_stop(&peer.timeout);
     const int rc = ble_gap_terminate(peer.connection, BLE_ERR_REM_USER_CONN_TERM);
     if (rc == BLE_HS_ENOTCONN) {
@@ -98,6 +116,7 @@ bool Snapshot(Peer& peer, os_mbuf* mbuf) {
         !input.Apply(Side(peer), bytes, sizeof(bytes), Encrypted(peer)))
         return false;
     const auto state = input.Combined();
+    PublishStatus();
     unsigned pressed = 0;
     for (uint8_t byte : state)
         for (; byte; byte &= byte - 1)
@@ -115,6 +134,7 @@ int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void
         return 0;
     }
     peer->phase = Phase::Ready;
+    PublishStatus();
     ble_npl_callout_stop(&peer->timeout);
     ESP_LOGI(kTag, "%s ready, encrypted input only; HID OFF", Side(*peer) ? "right" : "left");
     return 0;
@@ -276,6 +296,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         ++peer.generation;
         peer.retry_after = esp_timer_get_time() + 5000000;
         ESP_LOGI(kTag, "%s disconnected; its positions released", (cookie & 1) ? "right" : "left");
+        PublishStatus();
         Retry();
     } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
                peer.connection == event->enc_change.conn_handle) {
@@ -352,6 +373,7 @@ void OnReset(int reason) {
         peers[side].phase = Phase::Idle;
         ++peers[side].generation;
     }
+    PublishStatus();
 }
 void Host(void*) {
     nimble_port_run();
@@ -362,6 +384,7 @@ void Host(void*) {
 void StartCubeSplitBench() {
     Configure(peers[0], CONFIG_CUBE_SPLIT_LEFT_ADDRESS, CONFIG_CUBE_SPLIT_LEFT_ADDRESS_TYPE);
     Configure(peers[1], CONFIG_CUBE_SPLIT_RIGHT_ADDRESS, CONFIG_CUBE_SPLIT_RIGHT_ADDRESS_TYPE);
+    PublishStatus();
     if (peers[0].configured && peers[1].configured &&
         std::memcmp(&peers[0].address, &peers[1].address, sizeof(ble_addr_t)) == 0) {
         ESP_LOGE(kTag, "Same identity for both halves; bench disabled");
@@ -390,3 +413,5 @@ void StartCubeSplitBench() {
     ble_store_config_init();
     nimble_port_freertos_init(Host);
 }
+
+uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
