@@ -485,5 +485,10 @@ std::string CubeSplitBenchBind(const std::string& command) {
     const int write = nvs_set_str(handle, request.side ? "right" : "left", request.stored.c_str());
     const int commit = write == ESP_OK ? nvs_commit(handle) : write;
     nvs_close(handle);
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+    return commit == ESP_OK ? "CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-MODE-UNCHANGED"
+                            : "ERR NVS-WRITE";
+#else
     return commit == ESP_OK ? "CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-OFF" : "ERR NVS-WRITE";
+#endif
 }

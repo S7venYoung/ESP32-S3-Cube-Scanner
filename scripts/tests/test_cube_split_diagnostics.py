@@ -20,3 +20,8 @@ class CubeSplitDiagnosticsTest(unittest.TestCase):
         self.assertTrue(state['left_ready'] and state['right_ready'])
         for response in ['CUBE-CODEX/2', 'CUBE-SPLIT-BENCH/1 0 HID-ON', 'CUBE-SPLIT-BENCH/1 16 HID-OFF', 'CUBE-SPLIT-BENCH/1 65535 HID-OFF']:
             with self.assertRaises(ValueError): diag.decode_status(response)
+
+    def test_usb_candidate_status_reports_actual_enable_state(self):
+        self.assertTrue(diag.decode_status('CUBE-USB-CANDIDATE/1 15 HID-ON')['hid_enabled'])
+        self.assertFalse(diag.decode_status('CUBE-USB-CANDIDATE/1 15 HID-OFF')['hid_enabled'])
+        with self.assertRaises(ValueError): diag.validate_identity('C1:23:45:67:89:AB', 2)

@@ -120,7 +120,7 @@ public:
         uint8_t bits = 0;
         for (size_t p = 0; p < Positions; ++p)
             if (pressed_[p] && latched_[p].kind == Kind::Media)
-                bits |= latched_[p].value;
+                bits |= latched_[p].value & 7;
         return bits;
     }
     uint16_t Actions() const { return actions_; }

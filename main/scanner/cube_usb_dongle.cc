@@ -173,10 +173,19 @@ bool StartCubeUsbDongle() {
         return false;
     tinyusb_config_cdcacm_t cdc{};
     cdc.cdc_port = TINYUSB_CDC_ACM_0;
-    if (tinyusb_cdcacm_init(&cdc) != ESP_OK)
+    if (tinyusb_cdcacm_init(&cdc) != ESP_OK) {
+        tinyusb_driver_uninstall();
         return false;
-    if (xTaskCreate(Worker, "cube-hid", 4096, nullptr, 5, nullptr) != pdPASS)
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        ReleaseLocked();  // Initial enumeration must also wait for neutral input.
+    }
+    if (xTaskCreate(Worker, "cube-hid", 4096, nullptr, 5, nullptr) != pdPASS) {
+        tinyusb_cdcacm_deinit(TINYUSB_CDC_ACM_0);
+        tinyusb_driver_uninstall();
         return false;
+    }
     ESP_LOGW(kTag, "USB candidate: HID keyboard/media + CDC; hardware validation required");
     return true;
 }
@@ -186,7 +195,7 @@ int CubeCdcRead(char* bytes, size_t size) {
         ESP_OK)
         return 0;
     if (!count)
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(20));
     return count;
 }
 void CubeCdcWrite(const char* bytes, size_t size) {
@@ -209,6 +218,10 @@ void CubeUsbEnable(bool value) {
     std::lock_guard<std::mutex> lock(mutex);
     enabled = value;
     ReleaseLocked();
+}
+bool CubeUsbEnabled() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return enabled;
 }
 void CubeUsbRelease() {
     std::lock_guard<std::mutex> lock(mutex);

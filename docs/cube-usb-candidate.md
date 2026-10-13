@@ -6,6 +6,8 @@ Keyboard ID1 is an eight-byte, six-key HID report with modifiers; seven held ord
 
 `CAPS`, `PAIR`, `CODEX2` and Wi-Fi sync remain available. The existing companion should identify the new CDC port by protocol, but must be physically verified. `DONGLE` identifies this build as `CUBE-USB-CANDIDATE/1 <status> HID-ON`, not the input-only bench. `DONGLE BIND` still explicitly saves peer identities and requires manual reboot; obtain both real fixed public/static identities first. `DONGLE DISABLE` releases and blocks output; `DONGLE ENABLE` requires neutral input before rearming. These enable/disable commands are not persistent. Disconnect the companion before opening the port manually.
 
+The diagnostic client also supports this candidate. If explicit binding arguments are supplied, it disables HID before writing identities; read-only status does not change output. Binding acknowledgements say `HID-MODE-UNCHANGED` rather than falsely claiming an HID-off build. A disabled candidate reports `HID-OFF` in its status response. The host-test suite does not constitute hardware validation.
+
 ## Not implemented / not verified
 
 - Computer Bluetooth HID output and BT_SEL/BT_CLR/BT_CLR_ALL actions are **not** implemented in this USB-only candidate. These actions are recognized separately and logged; they are not silently mapped to keyboard usages.

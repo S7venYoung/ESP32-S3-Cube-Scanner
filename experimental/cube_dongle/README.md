@@ -1,5 +1,7 @@
 # Xingzhi Cube dongle — experimental input bench (HID off)
 
+The separate `xingzhi-cube-1.54tft-wifi-usb-dongle-candidate` variant now includes actual USB HID + CDC output and the static Velvet keymap. See `docs/cube-usb-candidate.md` for its limitations. This input-only bench remains HID-off; neither variant is the requested final USB/BLE dongle.
+
 Target: preserve XiaoZhi/Codex UI, receive two ZMK split peripherals, output keyboard input to a computer over USB **or** BLE. The host-tested core now has an opt-in NimBLE input-only adapter at `main/scanner/cube_split_bench.cc`. Normal Codex builds remain unchanged. The bench variant compiles the client but does not implement either computer HID output; it is not a usable keyboard dongle yet.
 
 ## Stage 2 bench

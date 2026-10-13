@@ -6,6 +6,8 @@ import time
 
 
 def validate_identity(value, address_type):
+    if address_type not in (0, 1):
+        raise ValueError('地址类型只能是 0 或 1')
     if not re.fullmatch(r'(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}', value):
         raise ValueError('MAC 地址格式应为 AA:BB:CC:DD:EE:FF')
     octets = bytes(int(part, 16) for part in value.split(':'))
@@ -17,14 +19,17 @@ def validate_identity(value, address_type):
 
 
 def decode_status(line):
-    match = re.fullmatch(r'CUBE-SPLIT-BENCH/1 (\d+) HID-OFF', line)
+    match = re.fullmatch(r'CUBE-(SPLIT-BENCH|USB-CANDIDATE)/1 (\d+) HID-(ON|OFF)', line)
     if not match:
         raise ValueError('不是输入测试固件的诊断响应；不会继续写入配置')
-    word = int(match.group(1))
+    if match.group(1) == 'SPLIT-BENCH' and match.group(3) != 'OFF':
+        raise ValueError('输入测试固件不能启用 HID')
+    word = int(match.group(2))
     if word & ~0xff0f or (word >> 8) > 61:
         raise ValueError('诊断状态不合法')
     return dict(left_configured=bool(word & 1), right_configured=bool(word & 2),
-                left_ready=bool(word & 4), right_ready=bool(word & 8), pressed=word >> 8)
+                left_ready=bool(word & 4), right_ready=bool(word & 8), pressed=word >> 8,
+                variant=match.group(1), hid_enabled=match.group(3) == 'ON')
 
 
 def exchange(port, command, prefix):
@@ -66,10 +71,15 @@ def main():
         port.open()
         if exchange(port, 'CAPS', 'CUBE-') != 'CUBE-CODEX/2':
             raise ValueError('设备不是 Cube；不会写入配置')
-        print('当前状态:', decode_status(exchange(port, 'DONGLE', 'CUBE-SPLIT-BENCH/')))
+        status = decode_status(exchange(port, 'DONGLE', 'CUBE-'))
+        print('当前状态:', status)
+        if bindings and status['variant'] == 'USB-CANDIDATE':
+            if exchange(port, 'DONGLE DISABLE', 'CUBE-USB-CANDIDATE ') != 'CUBE-USB-CANDIDATE DISABLED':
+                raise ValueError('无法禁用 HID，停止配置写入')
+            print('配置期间已禁用 HID；手动重启后恢复。')
         for side, address, kind in bindings:
             reply = exchange(port, f'DONGLE BIND {side} {address} {kind}', 'CUBE-SPLIT-BIND ')
-            if reply != 'CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-OFF':
+            if reply not in ('CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-OFF', 'CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-MODE-UNCHANGED'):
                 raise ValueError('配置保存响应异常；停止后续配置')
             print(f'{side} 已保存；手动重启后生效，未清除配对、未重启设备。')
         if bindings:

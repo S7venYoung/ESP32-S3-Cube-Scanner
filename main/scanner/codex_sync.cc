@@ -130,7 +130,7 @@ void SyncTask(void*) {
                     else if (line == "PAIR") Reply("CUBE-PAIR " + IpAddress() + " " + token);
 #if CONFIG_CUBE_SPLIT_BENCH
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
-                    else if (line == "DONGLE") Reply("CUBE-USB-CANDIDATE/1 " + std::to_string(CubeSplitBenchStatus()) + " HID-ON");
+                    else if (line == "DONGLE") Reply("CUBE-USB-CANDIDATE/1 " + std::to_string(CubeSplitBenchStatus()) + (CubeUsbEnabled() ? " HID-ON" : " HID-OFF"));
 #else
                     else if (line == "DONGLE") Reply("CUBE-SPLIT-BENCH/1 " + std::to_string(CubeSplitBenchStatus()) + " HID-OFF");
 #endif
