@@ -12,6 +12,7 @@
 #include <tinyusb.h>
 #include <tinyusb_cdc_acm.h>
 #include <tinyusb_default_config.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -247,10 +248,27 @@ int CubeCdcRead(char* bytes, size_t size) {
     return count;
 }
 void CubeCdcWrite(const char* bytes, size_t size) {
-    if (tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, reinterpret_cast<const uint8_t*>(bytes),
-                                   size) != size)
-        ESP_LOGW(kTag, "CDC reply buffer full");
-    tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(200));
+    if (!CubeCdcWritePacket(reinterpret_cast<const uint8_t*>(bytes), size))
+        ESP_LOGW(kTag, "CDC reply interrupted");
+}
+bool CubeCdcWritePacket(const uint8_t* bytes, size_t size) {
+    if (!bytes || size > 8194)
+        return false;
+    const int64_t deadline = esp_timer_get_time() + 2000000;
+    size_t at = 0;
+    while (at < size) {
+        if (!tud_mounted() || esp_timer_get_time() >= deadline)
+            return false;
+        const size_t chunk = std::min(size - at, size_t(64));
+        const size_t queued = tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, bytes + at, chunk);
+        at += queued;
+        const auto rc = tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(20));
+        if (rc != ESP_OK && rc != ESP_ERR_TIMEOUT)
+            return false;
+        if (!queued)
+            vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(200)) == ESP_OK;
 }
 void CubeUsbSubmit(const cube_dongle::ReportFrame& frame) {
     std::lock_guard<std::mutex> lock(mutex);

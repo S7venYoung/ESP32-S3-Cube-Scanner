@@ -41,6 +41,15 @@ config CUBE_USB_DONGLE_OUTPUT
         Replaces USB Serial/JTAG sync with TinyUSB CDC. BLE computer output
         and advanced ZMK behaviors are not implemented by this candidate.
 
+config CUBE_STUDIO_RPC
+    bool "Cube USB ZMK Studio / DYA keymap configuration"
+    depends on CUBE_USB_DONGLE_OUTPUT && CUBE_BLE_DONGLE_OUTPUT
+    default n
+    help
+        Standard Studio core, behavior metadata and existing keymap editing
+        over CDC. Double-click BOOT unlocks writes for five minutes.
+        Fixed three layers; advanced custom DYA modules are not advertised.
+
 config CUBE_BLE_DONGLE_OUTPUT
     bool "Experimental Cube computer BLE HID + five profiles"
     depends on CUBE_USB_DONGLE_OUTPUT && BT_NIMBLE_ROLE_PERIPHERAL && BT_NIMBLE_GATT_SERVER

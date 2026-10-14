@@ -1,4 +1,7 @@
 #include "codex_metrics.h"
+#if CONFIG_CUBE_STUDIO_RPC
+#include "cube_studio.h"
+#endif
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
 #include "cube_usb_dongle.h"
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
@@ -107,6 +110,9 @@ void SyncTask(void*) {
     bool overflow = false;
     char bytes[64];
     for (;;) {
+#if CONFIG_CUBE_STUDIO_RPC
+        CubeStudioPoll();
+#endif
         if (server == nullptr && IpAddress() != "0.0.0.0") {
             httpd_config_t config = HTTPD_DEFAULT_CONFIG();
             config.server_port = 8765;
@@ -139,6 +145,13 @@ void SyncTask(void*) {
             vTaskDelay(pdMS_TO_TICKS(200));
         for (int i = 0; i < count; ++i) {
             const char c = bytes[i];
+#if CONFIG_CUBE_STUDIO_RPC
+            if (CubeStudioFeed(static_cast<uint8_t>(c))) {
+                line.clear();
+                overflow = false;
+                continue;
+            }
+#endif
             if (c == '\n') {
                 if (!overflow) {
                     if (line == "PING")
@@ -240,6 +253,9 @@ void StartCodexSync() {
         settings.SetString("token", token);
     }
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioInitialize();
+#endif
     uart_ready = StartCubeUsbDongle();
     if (!uart_ready)
         ESP_LOGE("CodexSync", "USB HID/CDC initialization failed");
@@ -272,7 +288,12 @@ void StartCodexSync() {
     } else
         uart_ready = true;
 #endif
-    if (xTaskCreate(SyncTask, "codex_sync", 4096, nullptr, 2, nullptr) != pdPASS) {
+#if CONFIG_CUBE_STUDIO_RPC
+    constexpr uint32_t sync_stack = 8192;
+#else
+    constexpr uint32_t sync_stack = 4096;
+#endif
+    if (xTaskCreate(SyncTask, "codex_sync", sync_stack, nullptr, 2, nullptr) != pdPASS) {
         ESP_LOGE("CodexSync", "Unable to start sync task");
     }
 }

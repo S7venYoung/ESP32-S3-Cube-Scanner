@@ -47,4 +47,5 @@ jobs:
             build/SHA256SUMS
             build/DUAL-CANDIDATE-NOT-FINAL.md
             build/AUTO-BINDING.md
+            build/DYA-STUDIO.md
           if-no-files-found: error

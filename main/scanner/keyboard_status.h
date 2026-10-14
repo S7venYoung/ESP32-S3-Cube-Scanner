@@ -4,7 +4,7 @@
 
 struct KeyboardStatus {
     bool online = false;
-    char layer[5] = {};
+    char layer[17] = {};
     int profile = -1, wpm = -1;
     bool usb = false, ble = false;
     uint8_t modifiers = 0;

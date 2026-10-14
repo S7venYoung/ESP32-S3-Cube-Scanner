@@ -64,6 +64,8 @@ public:
     static_assert(Positions <= 128 && Layers > 0 && Layers <= 16);
     using Keymap = std::array<std::array<Binding, Positions>, Layers>;
     explicit KeyboardState(const Keymap& keymap) : keymap_(keymap) {}
+    // Replace future bindings on the host thread; held keys keep their old binding.
+    void SetKeymap(const Keymap& keymap) { keymap_ = keymap; }
 
     // Process releases first. Latch press-time bindings so changing layers never
     // changes which usage is released. Simultaneous layer presses resolve first.

@@ -1,0 +1,16 @@
+# Cube 双模版的 DYA 配置
+
+仅 `xingzhi_cube_dual_candidate.bin` 启用。USB-only 版不新增此配置功能；本版本保留 USB 和电脑蓝牙键盘输出、小智和全部现有主题。
+
+1. 退出 macOS 同步程序、串口监视器和刷机工具，避免占用 CDC。
+2. Cube 正常开机连接 USB；在 Chrome/Edge 打开 https://studio.dya.cormoran.works/ ，选择 USB 和运行态 `Cube ZMK Dongle Candidate`。不要进入 ROM 下载模式。
+3. 双击 Cube 的 BOOT，解锁写入五分钟。短按仍为小智对话；长按是下载模式，请勿混淆。
+4. 可读取原始 61 键物理布局和 BASE/NVA/SYS 三层、修改已有绑定和层名、保存、撤销未保存修改。保存返回成功前会检查 NVS 提交结果，重启后恢复已保存配置。
+
+当前支持：普通键、组合修饰键、透明/禁用键、瞬时层、音量加减/静音、BT_SEL 0..4、BT_CLR、BT_CLR_ALL。修改只影响后续按下的键，已经按住的键保留原绑定直到释放。恢复 Studio 设置仅恢复此 keymap，不清除 Wi-Fi、小智激活或蓝牙配对。
+
+这不是完整 ZMK 引擎：固定三层，不支持新增/删除/重排层、宏、组合键、hold-tap、鼠标行为、DYA 其他自定义子系统。不支持的功能返回错误，不声明虚假能力。电脑蓝牙 HID 正常保留，但 DYA 配置通信当前仅接 USB CDC，未实现 BLE Studio GATT。
+
+二进制 Studio framing 与原 Codex 文本协议共用 CDC，由帧边界隔离。单帧上限 4096 字节，超过限制的帧丢弃；半帧两秒超时；USB 断开及五分钟超时重新锁定。NVS 只使用 `cube_studio/keymap_v1`，不触碰 split/host 绑定。
+
+协议依据 cormoran/zmk-studio-messages `89b81d2e587fce807b668dff2a6967a40beef421`，独立实现。主机测试包含分帧/转义、协议响应、持久化损坏、保存失败、非法参数、锁定及输入释放。编译成功不等于网页或实机验证，首次安装后需确认网页载入、修改保存、重启保留及持续打字。

@@ -6,6 +6,7 @@
 bool StartCubeUsbDongle();
 int CubeCdcRead(char* bytes, size_t size);
 void CubeCdcWrite(const char* bytes, size_t size);
+bool CubeCdcWritePacket(const uint8_t* bytes, size_t size);
 void CubeUsbSubmit(const cube_dongle::ReportFrame& frame);
 void CubeUsbEnable(bool enabled);
 bool CubeUsbEnabled();

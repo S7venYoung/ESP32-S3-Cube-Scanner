@@ -12,6 +12,9 @@
 #if CONFIG_ZMK_SCANNER_MODE
 #include "scanner/codex_scanner_display.h"
 #include "scanner/zmk_scanner.h"
+#if CONFIG_CUBE_STUDIO_RPC
+#include "scanner/cube_studio.h"
+#endif
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
 #include "scanner/cube_usb_dongle.h"
 #endif
@@ -95,6 +98,14 @@ private:
     }
 
     void InitializeButtons() {
+#if CONFIG_CUBE_STUDIO_RPC
+        boot_button_.OnDoubleClick([this]() {
+            Application::GetInstance().Schedule([this]() {
+                if (CubeStudioUnlockUsb())
+                    display_->ShowNotification("DYA USB 已解锁（5 分钟）");
+            });
+        });
+#endif
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
             auto& app = Application::GetInstance();

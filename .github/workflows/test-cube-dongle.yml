@@ -14,10 +14,15 @@ jobs:
         run: |
           python3 -m venv /tmp/cube-dongle-format
           /tmp/cube-dongle-format/bin/pip install clang-format==21.1.8
-          /tmp/cube-dongle-format/bin/clang-format --dry-run -Werror experimental/cube_dongle/*.h experimental/cube_dongle/state_test.cc main/scanner/cube_split_bench.cc main/scanner/cube_split_bench.h main/scanner/cube_usb_dongle.cc main/scanner/cube_usb_dongle.h main/scanner/cube_ble_dongle.cc main/scanner/cube_ble_dongle.h
+          /tmp/cube-dongle-format/bin/clang-format --dry-run -Werror experimental/cube_dongle/*.h experimental/cube_dongle/state_test.cc experimental/cube_dongle/studio_test.cc main/scanner/cube_split_bench.cc main/scanner/cube_split_bench.h main/scanner/cube_usb_dongle.cc main/scanner/cube_usb_dongle.h main/scanner/cube_ble_dongle.cc main/scanner/cube_ble_dongle.h main/scanner/cube_studio.cc main/scanner/cube_studio.h
       - name: Check position state, layers, release safety and output routing
         run: |
           clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/state_test.cc -o /tmp/cube-dongle-state-test
           /tmp/cube-dongle-state-test
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/studio_test.cc -o /tmp/cube-studio-test
+          /tmp/cube-studio-test
       - name: Check build configuration and USB diagnostic parsing
-        run: python3 -m unittest discover -s scripts/tests -q
+        run: |
+          python3 -m venv /tmp/cube-studio-proto
+          /tmp/cube-studio-proto/bin/pip install grpcio-tools==1.84.0
+          /tmp/cube-studio-proto/bin/python -m unittest discover -s scripts/tests -q

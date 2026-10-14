@@ -8,6 +8,9 @@
 #include "cube_usb_dongle.h"
 #endif
 #include "../../experimental/cube_dongle/auto_binding.h"
+#if CONFIG_CUBE_STUDIO_RPC
+#include "cube_studio.h"
+#endif
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "../../experimental/cube_dongle/velvet_positions.h"
 
@@ -75,6 +78,9 @@ const ble_uuid128_t kIdentity = BLE_UUID128_INIT(0x43, 0x56, 0x50, 0x31, 0x6f, 0
 cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
 cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 void PublishKeyboard() {
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioRefreshKeymap(keyboard);
+#endif
     keyboard.Apply(input.Combined());
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
@@ -132,8 +138,12 @@ void PublishStatus() {
     fight.modifiers = cube_dongle::UiModifiers(keyboard.Report()[0]);
     KeyboardStatus status;
     status.online = fight.online;
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioLayerName(keyboard.ActiveLayer(), status.layer, sizeof(status.layer));
+#else
     const char* layers[] = {"BASE", "NVA", "SYS"};
     std::snprintf(status.layer, sizeof(status.layer), "%s", layers[keyboard.ActiveLayer()]);
+#endif
     status.wpm = fight.online ? std::max(0, fight.left_wpm) + std::max(0, fight.right_wpm) : -1;
     status.modifiers = fight.modifiers;
     status.left_battery = fight.left_battery;
@@ -681,6 +691,9 @@ void Host(void*) {
 }  // namespace
 
 void StartCubeSplitBench() {
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioInitialize();
+#endif
     static bool started = false;
     if (started)
         return;
