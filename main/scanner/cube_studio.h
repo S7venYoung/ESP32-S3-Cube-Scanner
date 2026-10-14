@@ -3,6 +3,7 @@
 void CubeStudioInitialize();
 void CubeStudioPoll();
 bool CubeStudioFeed(uint8_t byte);
+bool CubeStudioFeedBle(uint8_t byte, uint32_t epoch);
 bool CubeStudioUnlockUsb();
 void CubeStudioRefreshKeymap(cube_dongle::KeyboardState<61, 3>& keyboard);
 void CubeStudioLayerName(size_t layer, char* name, size_t capacity);

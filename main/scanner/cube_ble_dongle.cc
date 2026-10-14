@@ -1,6 +1,7 @@
 #include "cube_ble_dongle.h"
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <host/ble_att.h>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs.h>
@@ -13,6 +14,10 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#if CONFIG_CUBE_STUDIO_RPC
+#include <mutex>
+#include "../../experimental/cube_dongle/studio_transport.h"
+#endif
 #include "../../experimental/cube_dongle/host_control.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "cube_split_bench.h"
@@ -23,6 +28,19 @@ using cube_dongle::HostCommand;
 using cube_dongle::HostRequest;
 using cube_dongle::ReportFrame;
 constexpr char kTag[] = "CubeBleDongle";
+#if CONFIG_CUBE_STUDIO_RPC
+const ble_uuid128_t studio_uuid = BLE_UUID128_INIT(0x2a, 0x48, 0xc2, 0xb1, 0xcf, 0xc5, 0x67, 0xc9,
+                                                   0x07, 0x61, 0x96, 0x01, 0, 0, 0, 0);
+const ble_uuid128_t studio_char_uuid = BLE_UUID128_INIT(0x2a, 0x48, 0xc2, 0xb1, 0xcf, 0xc5, 0x67,
+                                                        0xc9, 0x07, 0x61, 0x96, 0x01, 1, 0, 0, 0);
+std::mutex studio_mutex;
+cube_dongle::studio::BlePipe studio_pipe;
+std::atomic<bool> studio_ready{false};
+std::atomic<uint32_t> studio_epoch{1};
+uint16_t studio_handle = 0;
+bool studio_subscribed = false;
+int64_t studio_inflight_since = 0;
+#endif
 struct Profile {
     bool bound = false;
     ble_addr_t identity{};
@@ -75,7 +93,70 @@ bool Encrypted() {
 bool NotifyReady() {
     return authorized && Encrypted() && !suspended && (protocol ? keyboard_sub : boot_sub);
 }
+#if CONFIG_CUBE_STUDIO_RPC
+void AuthorizeAfterPersistence();
+void StudioReset() {
+    std::lock_guard<std::mutex> lock(studio_mutex);
+    studio_ready = false;
+    const uint32_t epoch = studio_epoch.fetch_add(1) + 1;
+    studio_pipe.Reset(epoch);
+    studio_inflight_since = 0;
+}
+void StudioPublish() {
+    const bool ready = authorized && Encrypted() && studio_subscribed && !transition;
+    if (!ready && studio_ready.load())
+        StudioReset();
+    studio_ready = ready;
+}
+void StudioPump() {
+    if (!studio_ready)
+        return;
+    uint8_t bytes[512];
+    size_t size = 0;
+    bool timed_out = false;
+    {
+        std::lock_guard<std::mutex> lock(studio_mutex);
+        if (studio_pipe.Pending()) {
+            timed_out = esp_timer_get_time() - studio_inflight_since > 5000000;
+        } else {
+            size = studio_pipe.Next(bytes, ble_att_mtu(connection));
+            if (size)
+                studio_inflight_since = esp_timer_get_time();
+        }
+    }
+    if (timed_out)
+        ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+    if (!size)
+        return;
+    auto* mbuf = ble_hs_mbuf_from_flat(bytes, size);
+    const int rc =
+        mbuf ? ble_gatts_indicate_custom(connection, studio_handle, mbuf) : BLE_HS_ENOMEM;
+    if (rc) {
+        std::lock_guard<std::mutex> lock(studio_mutex);
+        studio_pipe.Retry();
+    }
+}
+int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
+    if (security_pending && conn == connection)
+        AuthorizeAfterPersistence();
+    if (conn != connection || !authorized || !Encrypted())
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    if (!studio_subscribed)
+        return BLE_ATT_ERR_UNLIKELY;
+    if (ctx->op != BLE_GATT_ACCESS_OP_WRITE_CHR)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    const size_t size = OS_MBUF_PKTLEN(ctx->om);
+    uint8_t bytes[512];
+    if (!size || size > sizeof(bytes) || os_mbuf_copydata(ctx->om, 0, size, bytes))
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    std::lock_guard<std::mutex> lock(studio_mutex);
+    return studio_pipe.Receive(bytes, size) ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+#endif
 void Publish() {
+#if CONFIG_CUBE_STUDIO_RPC
+    StudioPublish();
+#endif
     public_status = (enabled ? 1u : 0u) | (routed_ble ? 2u : 0u) | (NotifyReady() ? 4u : 0u) |
                     (selected << 8) | (static_cast<unsigned>(preference) << 16) |
                     ((transition || mailbox.load()) ? 1u << 24 : 0u) | (configured ? 1u << 25 : 0u);
@@ -183,6 +264,12 @@ void Advertise() {
     fields.uuids16 = &hid_uuid;
     fields.num_uuids16 = 1;
     fields.uuids16_is_complete = 1;
+#if CONFIG_CUBE_STUDIO_RPC
+    // 31-byte legacy advertising: flags 3 + appearance 4 + HID 4 + Studio 18 = 29.
+    fields.uuids128 = &studio_uuid;
+    fields.num_uuids128 = 1;
+    fields.uuids128_is_complete = 1;
+#endif
     int rc = ble_gap_adv_set_fields(&fields);
     const char name[] = "Cube Velvet Pro";
     ble_svc_gap_device_name_set(name);
@@ -240,6 +327,10 @@ int Gap(ble_gap_event* event, void* arg) {
             return 0;
         }
         connection = event->connect.conn_handle;
+#if CONFIG_CUBE_STUDIO_RPC
+        studio_subscribed = false;
+        StudioReset();
+#endif
         authorized = false;
         security_pending = false;
         protocol = 1;
@@ -260,6 +351,10 @@ int Gap(ble_gap_event* event, void* arg) {
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                connection == event->disconnect.conn.conn_handle) {
         connection = BLE_HS_CONN_HANDLE_NONE;
+#if CONFIG_CUBE_STUDIO_RPC
+        studio_subscribed = false;
+        StudioReset();
+#endif
         authorized = false;
         security_pending = false;
         keyboard_sub = media_sub = boot_sub = false;
@@ -280,6 +375,15 @@ int Gap(ble_gap_event* event, void* arg) {
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     } else if (event->type == BLE_GAP_EVENT_SUBSCRIBE &&
                connection == event->subscribe.conn_handle) {
+#if CONFIG_CUBE_STUDIO_RPC
+        if (event->subscribe.attr_handle == studio_handle) {
+            studio_subscribed = event->subscribe.cur_indicate;
+            if (!studio_subscribed)
+                StudioReset();
+            Publish();
+            return 0;
+        }
+#endif
         if (event->subscribe.attr_handle == keyboard_handle)
             keyboard_sub = event->subscribe.cur_notify;
         if (event->subscribe.attr_handle == media_handle)
@@ -291,9 +395,20 @@ int Gap(ble_gap_event* event, void* arg) {
             barrier.Begin();
         if (authorized)
             Notice(NotifyReady() ? 2 : 1);
-    } else if (event->type == BLE_GAP_EVENT_NOTIFY_TX &&
-               connection == event->notify_tx.conn_handle && inflight &&
-               flight_handle == event->notify_tx.attr_handle && !event->notify_tx.indication) {
+    }
+#if CONFIG_CUBE_STUDIO_RPC
+    else if (event->type == BLE_GAP_EVENT_NOTIFY_TX && connection == event->notify_tx.conn_handle &&
+             event->notify_tx.attr_handle == studio_handle && event->notify_tx.indication) {
+        if (event->notify_tx.status == BLE_HS_EDONE) {
+            std::lock_guard<std::mutex> lock(studio_mutex);
+            studio_pipe.Confirm();
+        } else if (event->notify_tx.status != 0)
+            ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+    }
+#endif
+    else if (event->type == BLE_GAP_EVENT_NOTIFY_TX && connection == event->notify_tx.conn_handle &&
+             inflight && flight_handle == event->notify_tx.attr_handle &&
+             !event->notify_tx.indication) {
         inflight = false;
         if (event->notify_tx.status) {
             ReleaseBle();
@@ -443,12 +558,23 @@ bool RegisterGatt() {
     device_info[0].access_cb = Access;
     device_info[0].arg = reinterpret_cast<void*>(Pnp);
     device_info[0].flags = BLE_GATT_CHR_F_READ;
-    static ble_gatt_svc_def services[3]{};
+    static ble_gatt_svc_def services[4]{};
     services[0].type = services[1].type = BLE_GATT_SVC_TYPE_PRIMARY;
     services[0].uuid = &hid.u;
     services[0].characteristics = chars;
     services[1].uuid = &dis.u;
     services[1].characteristics = device_info;
+#if CONFIG_CUBE_STUDIO_RPC
+    static ble_gatt_chr_def studio_chars[2]{};
+    studio_chars[0].uuid = &studio_char_uuid.u;
+    studio_chars[0].access_cb = StudioAccess;
+    studio_chars[0].flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP |
+                            BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_INDICATE;
+    studio_chars[0].val_handle = &studio_handle;
+    services[2].type = BLE_GATT_SVC_TYPE_PRIMARY;
+    services[2].uuid = &studio_uuid.u;
+    services[2].characteristics = studio_chars;
+#endif
     ble_svc_gap_init();
     ble_svc_gatt_init();
     ble_svc_gap_device_name_set("Cube Velvet Pro");
@@ -650,6 +776,10 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+#if CONFIG_CUBE_STUDIO_RPC
+    studio_subscribed = false;
+    StudioReset();
+#endif
     ++host_epoch;
     security_pending = false;
     synced = false;
@@ -668,6 +798,10 @@ void CubeDualTick() {
         return;
     if (security_pending && connection != BLE_HS_CONN_HANDLE_NONE)
         AuthorizeAfterPersistence();
+#if CONFIG_CUBE_STUDIO_RPC
+    StudioPublish();
+    StudioPump();
+#endif
     if (connection != BLE_HS_CONN_HANDLE_NONE &&
         ((!authorized && esp_timer_get_time() >= security_deadline) ||
          (inflight && esp_timer_get_time() - inflight_since > 3000000)))
@@ -756,6 +890,19 @@ std::string CubeDualCommand(const std::string& line) {
     return "CUBE-DUAL-CANDIDATE QUEUED " + std::to_string(ticket);
 }
 uint32_t CubeDualNotice() { return ui_notice.load(); }
+#if CONFIG_CUBE_STUDIO_RPC
+bool CubeBleStudioReady() { return studio_ready.load(); }
+uint32_t CubeBleStudioEpoch() { return studio_epoch.load(); }
+size_t CubeBleStudioRead(uint8_t* bytes, size_t capacity, uint32_t& epoch) {
+    std::lock_guard<std::mutex> lock(studio_mutex);
+    epoch = studio_pipe.Epoch();
+    return studio_ready.load() ? studio_pipe.Read(bytes, capacity) : 0;
+}
+bool CubeBleStudioWrite(const uint8_t* bytes, size_t size, uint32_t epoch) {
+    std::lock_guard<std::mutex> lock(studio_mutex);
+    return studio_ready.load() && studio_pipe.Write(bytes, size, epoch);
+}
+#endif
 bool CubeDualEnabled() { return public_status.load() & 1; }
 bool CubeDualUsesBle() { return public_status.load() & 2; }
 bool CubeDualBleReady() { return public_status.load() & 4; }

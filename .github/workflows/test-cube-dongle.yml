@@ -1,7 +1,7 @@
 name: Test experimental Cube dongle core
 on:
   push:
-    branches: [codex/xingzhi-cube-dongle]
+    branches: [codex/xingzhi-cube-dongle, codex/xingzhi-cube-dya-full]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +21,10 @@ jobs:
           /tmp/cube-dongle-state-test
           clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/studio_test.cc -o /tmp/cube-studio-test
           /tmp/cube-studio-test
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/optional_input_test.cc -o /tmp/cube-optional-input-test
+          /tmp/cube-optional-input-test
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/studio_transport_test.cc -o /tmp/cube-studio-transport-test
+          /tmp/cube-studio-transport-test
       - name: Check build configuration and USB diagnostic parsing
         run: |
           python3 -m venv /tmp/cube-studio-proto

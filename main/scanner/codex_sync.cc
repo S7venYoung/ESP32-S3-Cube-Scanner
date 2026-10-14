@@ -112,6 +112,12 @@ void SyncTask(void*) {
     for (;;) {
 #if CONFIG_CUBE_STUDIO_RPC
         CubeStudioPoll();
+        uint8_t studio_bytes[256];
+        uint32_t studio_epoch;
+        const size_t studio_count =
+            CubeBleStudioRead(studio_bytes, sizeof(studio_bytes), studio_epoch);
+        for (size_t i = 0; i < studio_count; ++i)
+            CubeStudioFeedBle(studio_bytes[i], studio_epoch);
 #endif
         if (server == nullptr && IpAddress() != "0.0.0.0") {
             httpd_config_t config = HTTPD_DEFAULT_CONFIG();
