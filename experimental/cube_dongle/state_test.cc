@@ -191,6 +191,33 @@ int main() {
     assert(queue.Push({}) && !queue.Inhibited());
     queue.Pop();
     assert(queue.Push(a));
+    ReportQueue<4> mouse_queue;
+    ReportFrame motion;
+    motion.pointer = {10, -10, 1, 0, 1};
+    assert(mouse_queue.Push(motion) && mouse_queue.Push(motion));
+    assert(mouse_queue.Front()->pointer.x == 10);
+    mouse_queue.Pop();
+    assert(mouse_queue.Front()->pointer.x == 10);  // Equal deltas are separate events.
+    mouse_queue.Pop();
+    motion.pointer.x = motion.pointer.y = 0;
+    motion.pointer.wheel = 0;
+    assert(mouse_queue.Push(motion) && mouse_queue.Push(motion));
+    mouse_queue.Pop();
+    assert(!mouse_queue.Front());  // Held buttons still coalesce.
+    mouse_queue.ReleaseAndInhibit();
+    assert(mouse_queue.Front()->Neutral() && !mouse_queue.Push(motion));
+    assert(mouse_queue.Push({}));
+    ReportQueue<4> combined_mouse;
+    motion.pointer = {10, 0, 0, 0, 0};
+    assert(combined_mouse.Push(motion));
+    assert(combined_mouse.Push(motion));
+    assert(combined_mouse.Push(motion));
+    assert(combined_mouse.Push({}));  // Idle ticks do not replay or cancel queued motion.
+    assert(combined_mouse.Front()->pointer.x == 10);
+    combined_mouse.Pop();
+    assert(combined_mouse.Front()->pointer.x == 20);
+    combined_mouse.Pop();
+    assert(!combined_mouse.Front());
     PeerBinding identity;
     assert(ParseIdentity("C1:23:45:67:89:AB", 1, identity));
     assert(identity.bytes[0] == 0xab && identity.bytes[5] == 0xc1);

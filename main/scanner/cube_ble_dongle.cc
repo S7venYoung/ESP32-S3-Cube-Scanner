@@ -55,7 +55,7 @@ enum class Output { Auto, Usb, Ble };
 Output preference = Output::Auto;
 bool routed_ble = false, enabled = true, configured = false, synced = false;
 bool authorized = false, suspended = false, keyboard_sub = false, media_sub = false,
-     boot_sub = false;
+     boot_sub = false, pointer_sub = false;
 bool security_pending = false;
 uintptr_t host_epoch = 1;
 int64_t advertisement_next = 0, transition_started = 0;
@@ -64,7 +64,7 @@ uint32_t notice_sequence = 0;
 void Notice(unsigned kind) { ui_notice = (++notice_sequence << 8) | (selected << 3) | kind; }
 uint8_t own_type = 0, protocol = 1, leds = 0;
 uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
-uint16_t keyboard_handle, media_handle, boot_handle;
+uint16_t keyboard_handle, media_handle, boot_handle, pointer_handle;
 int64_t pairing_until = 0, security_deadline = 0, inflight_since = 0;
 uint32_t revision = 0, flight_revision = 0;
 unsigned phase = 0;
@@ -72,9 +72,10 @@ uint16_t flight_handle = 0;
 bool inflight = false, neutral_sent = false;
 cube_dongle::ReportQueue<64> frames;
 ReportFrame physical_input;
-bool physical_neutral = true;
+bool physical_neutral = true, keyboard_neutral = true;
 cube_dongle::HostBarrier barrier;
 std::atomic<uint32_t> mailbox{0}, public_status{0};
+std::atomic<uint8_t> bound_profiles{0};
 std::atomic<uint32_t> next_ticket{0}, done_ticket{0};
 std::atomic<int> command_result{0};
 uint32_t pending_ticket = 0;
@@ -168,6 +169,11 @@ int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
 }
 #endif
 void Publish() {
+    uint8_t mask = 0;
+    for (unsigned i = 0; i < 5; ++i)
+        if (profiles[i].bound)
+            mask |= 1u << i;
+    bound_profiles = mask;
 #if CONFIG_CUBE_STUDIO_RPC
     StudioPublish();
     {
@@ -315,17 +321,23 @@ void Pump() {
     const auto* front = frames.Front();
     if (!front)
         return;
-    if (phase == 1 && (!protocol || !media_sub)) {
+    while ((phase == 1 && (!protocol || !media_sub)) || (phase == 2 && (!protocol || !pointer_sub)))
+        ++phase;
+    if (phase == 3) {
         if (front->Neutral())
             neutral_sent = true;
         frames.Pop();
         phase = 0;
         return;
     }
-    const uint16_t handle = phase == 0 ? (protocol ? keyboard_handle : boot_handle) : media_handle;
-    const void* bytes =
-        phase == 0 ? static_cast<const void*>(front->keyboard.data()) : &front->media;
-    auto* mbuf = ble_hs_mbuf_from_flat(bytes, phase == 0 ? 8 : 1);
+    const auto pointer = cube_dongle::PointerBytes(front->pointer);
+    const uint16_t handle = phase == 0   ? (protocol ? keyboard_handle : boot_handle)
+                            : phase == 1 ? media_handle
+                                         : pointer_handle;
+    const void* bytes = phase == 0   ? static_cast<const void*>(front->keyboard.data())
+                        : phase == 1 ? static_cast<const void*>(&front->media)
+                                     : static_cast<const void*>(pointer.data());
+    auto* mbuf = ble_hs_mbuf_from_flat(bytes, phase == 0 ? 8 : phase == 1 ? 1 : 7);
     if (!mbuf)
         return;  // bounded retry on the host timer
     inflight = true;
@@ -356,7 +368,7 @@ int Gap(ble_gap_event* event, void* arg) {
         security_pending = false;
         protocol = 1;
         suspended = false;
-        keyboard_sub = media_sub = boot_sub = false;
+        keyboard_sub = media_sub = boot_sub = pointer_sub = false;
         ReleaseBle();
         ble_gap_conn_desc desc{};
         if (ble_gap_conn_find(connection, &desc) ||
@@ -378,7 +390,7 @@ int Gap(ble_gap_event* event, void* arg) {
 #endif
         authorized = false;
         security_pending = false;
-        keyboard_sub = media_sub = boot_sub = false;
+        keyboard_sub = media_sub = boot_sub = pointer_sub = false;
         inflight = false;
         phase = 0;
         ReleaseBle();
@@ -409,6 +421,8 @@ int Gap(ble_gap_event* event, void* arg) {
             keyboard_sub = event->subscribe.cur_notify;
         if (event->subscribe.attr_handle == media_handle)
             media_sub = event->subscribe.cur_notify;
+        if (event->subscribe.attr_handle == pointer_handle)
+            pointer_sub = event->subscribe.cur_notify;
         if (event->subscribe.attr_handle == boot_handle)
             boot_sub = event->subscribe.cur_notify;
         ReleaseBle();
@@ -437,7 +451,7 @@ int Gap(ble_gap_event* event, void* arg) {
             last_result = event->notify_tx.status;
         } else if (flight_revision != revision)
             phase = 0;
-        else if (++phase == 2) {
+        else if (++phase == 3) {
             if (frames.Front() && frames.Front()->Neutral())
                 neutral_sent = true;
             frames.Pop();
@@ -461,7 +475,9 @@ enum Field : uintptr_t {
     Pnp,
     RefKeyboard,
     RefMedia,
-    RefOutput
+    RefOutput,
+    Pointer,
+    RefPointer
 };
 int Access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void* arg) {
     if (security_pending && conn == connection)
@@ -491,9 +507,14 @@ int Access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void* arg) {
         return 0;
     }
     const uint8_t info[] = {0x11, 0x01, 0, 0x02}, pnp[] = {2, 0x3a, 0x30, 0x04, 0x40, 0, 1};
-    const uint8_t ref[] = {static_cast<uint8_t>(field == RefMedia ? 2 : 1),
+    const uint8_t ref[] = {static_cast<uint8_t>(field == RefPointer ? 3
+                                                : field == RefMedia ? 2
+                                                                    : 1),
                            static_cast<uint8_t>(field == RefOutput ? 2 : 1)};
     ReportFrame current = authorized && conn == connection ? frames.Latest() : ReportFrame{};
+    current.pointer.x = current.pointer.y = 0;
+    current.pointer.wheel = current.pointer.pan = 0;
+    const auto pointer = cube_dongle::PointerBytes(current.pointer);
     const void* bytes = nullptr;
     size_t size = 0;
     switch (field) {
@@ -521,6 +542,10 @@ int Access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void* arg) {
             bytes = &current.media;
             size = 1;
             break;
+        case Pointer:
+            bytes = pointer.data();
+            size = pointer.size();
+            break;
         case OutputLed:
             bytes = &leds;
             size = 1;
@@ -528,6 +553,7 @@ int Access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void* arg) {
         case RefKeyboard:
         case RefMedia:
         case RefOutput:
+        case RefPointer:
             bytes = ref;
             size = 2;
             break;
@@ -544,14 +570,14 @@ bool RegisterGatt() {
                                         BLE_UUID16_INIT(0x2a4d), BLE_UUID16_INIT(0x2a4d),
                                         BLE_UUID16_INIT(0x2a4d), BLE_UUID16_INIT(0x2a22),
                                         BLE_UUID16_INIT(0x2a32), BLE_UUID16_INIT(0x2a50)};
-    static ble_gatt_dsc_def descriptors[3][2]{};
-    for (unsigned i = 0; i < 3; ++i) {
+    static ble_gatt_dsc_def descriptors[4][2]{};
+    for (unsigned i = 0; i < 4; ++i) {
         descriptors[i][0].uuid = &ref.u;
         descriptors[i][0].att_flags = BLE_ATT_F_READ;
         descriptors[i][0].access_cb = Access;
-        descriptors[i][0].arg = reinterpret_cast<void*>(RefKeyboard + i);
+        descriptors[i][0].arg = reinterpret_cast<void*>(i == 3 ? RefPointer : RefKeyboard + i);
     }
-    static ble_gatt_chr_def chars[10]{}, device_info[2]{};
+    static ble_gatt_chr_def chars[11]{}, device_info[2]{};
     const Field fields[] = {Info,  Map,       Protocol, Control,  Keyboard,
                             Media, OutputLed, Boot,     OutputLed};
     const uint16_t read = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC;
@@ -575,6 +601,12 @@ bool RegisterGatt() {
     chars[5].descriptors = descriptors[1];
     chars[6].descriptors = descriptors[2];
     chars[6].flags = chars[8].flags = read | write;
+    chars[9].uuid = &uuid[4].u;
+    chars[9].access_cb = Access;
+    chars[9].arg = reinterpret_cast<void*>(Pointer);
+    chars[9].flags = read | BLE_GATT_CHR_F_NOTIFY;
+    chars[9].val_handle = &pointer_handle;
+    chars[9].descriptors = descriptors[3];
     device_info[0].uuid = &uuid[9].u;
     device_info[0].access_cb = Access;
     device_info[0].arg = reinterpret_cast<void*>(Pnp);
@@ -810,6 +842,9 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+    CubeUsbRelease();  // USB must release even while the shared radio host is down.
+    physical_input = {};
+    physical_neutral = keyboard_neutral = true;
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioCancelMacros();
     studio_subscribed = false;
@@ -890,7 +925,9 @@ void CubeDualTick() {
     Publish();
 }
 void CubeDualSubmit(const ReportFrame& frame, uint16_t actions) {
+    const auto pointer = physical_input.pointer;
     physical_input = frame;
+    physical_input.pointer = pointer;
     // Actual physical-neutral status is supplied separately, including layer keys.
     if (actions) {
         HostRequest request;
@@ -910,7 +947,26 @@ void CubeDualSubmit(const ReportFrame& frame, uint16_t actions) {
     }
     CubeDualTick();
 }
-void CubeDualSetNeutral(bool value) { physical_neutral = value; }
+void CubeDualSetNeutral(bool value) {
+    keyboard_neutral = value;
+    physical_neutral = value && !physical_input.pointer.buttons;
+}
+void CubeDualActions(uint16_t actions) { CubeDualSubmit(physical_input, actions); }
+bool CubeDualPointer(const cube_dongle::PointerReport& pointer) {
+    if (pointer.buttons & ~0x1fu)
+        return false;
+    physical_input.pointer = pointer;
+    physical_neutral = keyboard_neutral && !pointer.buttons;
+    const bool ready =
+        enabled && !transition && !barrier.Waiting() &&
+        (routed_ble ? NotifyReady() && protocol && pointer_sub : CubeUsbPointerReady());
+    if (ready)
+        CubeDualTick();
+    // Relative motion is consumed once, never replayed by the 5ms timer.
+    physical_input.pointer.x = physical_input.pointer.y = 0;
+    physical_input.pointer.wheel = physical_input.pointer.pan = 0;
+    return ready;
+}
 void CubeDualRequireNeutral() {
     barrier.Begin();
     CubeUsbRelease();
@@ -1002,6 +1058,8 @@ cube_dongle::studio::Bytes CubeBleManagement(const cube_dongle::studio::Bytes& p
                     profile_names[index] = value;
                 }
             }
+        } else if (op->tag == 6) {
+            okay = CubeSplitForgetBonds();
         } else if (op->tag == 3 || op->tag == 4 || op->tag == 7) {
             if (CubeSplitBenchStatus() >> 8)
                 return wire::CustomError("Release keyboard keys before changing host");
@@ -1027,7 +1085,7 @@ cube_dongle::studio::Bytes CubeBleManagement(const cube_dongle::studio::Bytes& p
                 return wire::CustomError("Host change pending; read profiles before retrying");
             okay = command_result.load() == 0;
         } else
-            return wire::CustomError("Split bond reset relay not implemented");
+            return wire::CustomError("Unsupported BLE management operation");
         wire::Number(body, 1, okay);
     }
     wire::Message(result, op->tag + 1, body);
@@ -1046,6 +1104,7 @@ bool CubeBleStudioWrite(const uint8_t* bytes, size_t size, uint32_t epoch) {
 }
 #endif
 bool CubeDualEnabled() { return public_status.load() & 1; }
+uint8_t CubeDualBoundProfiles() { return bound_profiles.load(); }
 bool CubeDualUsesBle() { return public_status.load() & 2; }
 bool CubeDualBleReady() { return public_status.load() & 4; }
 int CubeDualProfile() { return (public_status.load() >> 8) & 7; }

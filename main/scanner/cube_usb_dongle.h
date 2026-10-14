@@ -8,6 +8,8 @@ int CubeCdcRead(char* bytes, size_t size);
 void CubeCdcWrite(const char* bytes, size_t size);
 bool CubeCdcWritePacket(const uint8_t* bytes, size_t size, uint32_t expected_epoch = UINT32_MAX);
 uint32_t CubeUsbEpoch();
+unsigned CubeUsbDetectedOs();
+bool CubeUsbPointerReady();
 void CubeUsbSubmit(const cube_dongle::ReportFrame& frame);
 void CubeUsbEnable(bool enabled);
 bool CubeUsbEnabled();

@@ -1,0 +1,62 @@
+#include "peripheral_rpc.h"
+#include <cassert>
+using namespace cube_dongle::studio;
+int main() {
+    Bytes request;
+    Message(request, 1, {});
+    auto carrier = WatchdogCarrier(42, request);
+    assert(carrier.size() == 118 && carrier[2] > 0 && carrier[3] == 0);
+    Reader relay(carrier.data() + 4, carrier[2]);
+    assert(relay.valid && relay.Value(1) == 42 && relay.Get(2));
+    auto diagnostics = DiagnosticsCarrier(17, request);
+    assert(diagnostics.size() == 35 && diagnostics[1] == 17);
+    assert(DiagnosticsCarrier(0, Bytes(33)).empty());
+    PeripheralPending pending;
+    pending.id = 42;
+    pending.source = 2;
+    auto wrap = [](const Bytes& payload) {
+        Bytes result(92, 0);
+        result[2] = payload.size();
+        std::copy(payload.begin(), payload.end(), result.begin() + 4);
+        return result;
+    };
+    Bytes status, body, response;
+    Number(status, 1, 16);
+    Message(body, 2, status);
+    Bytes message;
+    Number(message, 1, 42);
+    Message(message, 2, body);
+    assert(WatchdogReply(wrap(message), pending, response) && response == body);
+    Bytes incident, chunk;
+    Number(incident, 1, 1);
+    Number(incident, 2, 0);
+    Number(incident, 3, 2);
+    Number(chunk, 1, 0);
+    Number(chunk, 2, 1);
+    Number(chunk, 3, 0);
+    Message(chunk, 4, incident);
+    message.clear();
+    Number(message, 1, 42);
+    Message(message, 3, chunk);
+    assert(!WatchdogReply(wrap(message), pending, response) && pending.count == 1);
+    chunk.clear();
+    Number(chunk, 1, 1);
+    Number(chunk, 2, 1);
+    Number(chunk, 3, 0);
+    message.clear();
+    Number(message, 1, 42);
+    Message(message, 3, chunk);
+    response.clear();
+    assert(WatchdogReply(wrap(message), pending, response));
+    Reader page(response);
+    const auto* field = page.Get(3);
+    assert(field);
+    Reader entries(field->data, field->size);
+    const auto* entry = entries.Get(1);
+    assert(entry);
+    Reader record(entry->data, entry->size);
+    assert(record.Value(2) == 2);
+    assert(!WatchdogReply(Bytes(91), pending, response));
+    pending.deadline = 20;
+    assert(pending.Expired(20) && !pending.Expired(UINT32_MAX));
+}

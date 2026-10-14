@@ -47,7 +47,18 @@ private:
     std::array<Snapshot, 2> states_{};
 };
 
-enum class Kind { None, Transparent, Key, MomentaryLayer, Media, HostAction, RuntimeMacro };
+// Append only: these values are stored in existing keymap records.
+enum class Kind {
+    None,
+    Transparent,
+    Key,
+    MomentaryLayer,
+    Media,
+    HostAction,
+    RuntimeMacro,
+    ModTap,
+    LayerTap
+};
 struct Binding {
     Kind kind = Kind::None;
     uint16_t value = 0;  // Keyboard usage, layer, media bits, or explicit host command
@@ -70,6 +81,13 @@ public:
     // Replace future bindings on the host thread; held keys keep their old binding.
     void SetKeymap(const Keymap& keymap) { keymap_ = keymap; }
     void SetExternalLayers(uint16_t mask) { external_layers_ = mask; }
+    void SetDefaultLayer(size_t layer) { default_layer_ = layer; }
+    bool SetTappingTerm(unsigned ms) {
+        if (!ms || ms > 5000)
+            return false;
+        tapping_term_ = ms;
+        return true;
+    }
     bool SetLayerOrder(const std::array<size_t, Layers>& order, size_t count) {
         if (!count || count > Layers)
             return false;
@@ -86,10 +104,35 @@ public:
 
     // Process releases first. Latch press-time bindings so changing layers never
     // changes which usage is released. Simultaneous layer presses resolve first.
-    void Apply(const SplitState::Snapshot& snapshot) {
+    void Apply(const SplitState::Snapshot& snapshot, uint32_t now = 0) {
         actions_ = 0;
+        FlushTaps();
+        bool interrupted = false;
+        for (size_t p = 0; p < Positions; ++p)
+            interrupted |= !pressed_[p] && Down(snapshot, p);
+        // Hold-preferred: decide before resolving the interrupting key so a
+        // layer-tap affects that key. Unsigned subtraction tolerates clock wrap.
+        for (size_t p = 0; p < Positions; ++p) {
+            if (pending_[p] &&
+                ((Down(snapshot, p) && interrupted) || uint32_t(now - started_[p]) >= terms_[p])) {
+                const auto binding = latched_[p];
+                latched_[p] = binding.kind == Kind::LayerTap
+                                  ? Binding{Kind::MomentaryLayer, uint16_t(binding.value >> 8), 0}
+                                  : Binding{Kind::Key, uint16_t(binding.value >> 8), 0};
+                pending_[p] = false;
+            }
+        }
         for (size_t p = 0; p < Positions; ++p) {
             if (pressed_[p] && !Down(snapshot, p)) {
+                if (pending_[p]) {
+                    // Deliver a real tap press; caller flushes it after queuing
+                    // the report, producing a separate release even in one tick.
+                    latched_[p] = {Kind::Key, uint16_t(latched_[p].value & 255),
+                                   latched_[p].modifiers};
+                    pending_[p] = false;
+                    taps_[p] = true;
+                    continue;
+                }
                 pressed_[p] = false;
                 latched_[p] = {};
             }
@@ -105,6 +148,35 @@ public:
             if (!pressed_[p] && Down(snapshot, p))
                 Latch(p, Resolve(p));
         }
+        for (size_t p = 0; p < Positions; ++p)
+            if (pressed_[p] && IsHoldTap(latched_[p]) && !pending_[p]) {
+                pending_[p] = true;
+                started_[p] = now;
+                terms_[p] = tapping_term_;
+            }
+    }
+    bool NeedsTick() const {
+        for (auto pending : pending_)
+            if (pending)
+                return true;
+        return false;
+    }
+    bool FlushTaps() {
+        bool changed = false;
+        for (size_t p = 0; p < Positions; ++p)
+            if (taps_[p]) {
+                taps_[p] = pressed_[p] = false;
+                latched_[p] = {};
+                changed = true;
+            }
+        return changed;
+    }
+    void CancelHoldTaps() {
+        for (size_t p = 0; p < Positions; ++p)
+            if (pending_[p]) {
+                pending_[p] = false;
+                latched_[p] = {};  // Keep pressed latch until physical release.
+            }
     }
 
     KeyboardReport Report() const {
@@ -146,10 +218,13 @@ public:
     Binding PressedBinding(size_t position) const {
         return position < Positions && pressed_[position] ? latched_[position] : Binding{};
     }
+    Binding BindingAt(size_t position) const {
+        return position < Positions ? Resolve(position) : Binding{};
+    }
     size_t ActiveLayer() const {
-        size_t layer = order_[0];
-        for (size_t i = 1; i < layer_count_; ++i) {
-            if (external_layers_ & (1u << order_[i]))
+        size_t layer = DefaultLayer();
+        for (size_t i = 0; i < layer_count_; ++i) {
+            if (order_[i] == DefaultLayer() || (external_layers_ & (1u << order_[i])))
                 layer = order_[i];
             for (size_t p = 0; p < Positions; ++p)
                 if (pressed_[p] && latched_[p].kind == Kind::MomentaryLayer &&
@@ -160,12 +235,15 @@ public:
     }
 
 private:
+    static bool IsHoldTap(const Binding& b) {
+        return b.kind == Kind::ModTap || b.kind == Kind::LayerTap;
+    }
     static bool Down(const SplitState::Snapshot& snapshot, size_t position) {
         return snapshot[position / 8] & (1u << (position % 8));
     }
     Binding Resolve(size_t position) const {
         std::array<bool, Layers> active{};
-        active[order_[0]] = true;
+        active[DefaultLayer()] = true;
         for (size_t layer = 0; layer < Layers; ++layer)
             active[layer] = active[layer] || (external_layers_ & (1u << layer));
         for (size_t p = 0; p < Positions; ++p) {
@@ -187,11 +265,22 @@ private:
             actions_ |= 1u << binding.value;
     }
     Keymap keymap_;
+    size_t default_layer_ = Layers;
+    size_t DefaultLayer() const {
+        for (size_t i = 0; i < layer_count_; ++i)
+            if (order_[i] == default_layer_)
+                return default_layer_;
+        return order_[0];
+    }
     std::array<size_t, Layers> order_{};
     size_t layer_count_ = Layers;
     uint16_t external_layers_ = 0;
     std::array<bool, Positions> pressed_{};
     std::array<Binding, Positions> latched_{};
+    std::array<bool, Positions> pending_{}, taps_{};
+    std::array<uint32_t, Positions> started_{};
+    std::array<uint16_t, Positions> terms_{};
+    uint16_t tapping_term_ = 200;
     uint16_t actions_ = 0;
 };
 

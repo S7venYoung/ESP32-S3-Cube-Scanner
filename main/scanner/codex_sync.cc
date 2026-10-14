@@ -295,7 +295,7 @@ void StartCodexSync() {
         uart_ready = true;
 #endif
 #if CONFIG_CUBE_STUDIO_RPC
-    constexpr uint32_t sync_stack = 8192;
+    constexpr uint32_t sync_stack = 12288;  // Bounded nested DYA metadata/relay protobuf decoding.
 #else
     constexpr uint32_t sync_stack = 4096;
 #endif

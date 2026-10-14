@@ -17,45 +17,25 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include "../../experimental/cube_dongle/host_os.h"
 
 namespace {
 constexpr char kTag[] = "CubeUsbDongle";
 // One shared HID map: ID1 boot-shaped keyboard, ID2 three independent media buttons.
-const uint8_t report_map[] = {TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(1)),
-                              0x05,
-                              0x0c,
-                              0x09,
-                              0x01,
-                              0xa1,
-                              0x01,
-                              0x85,
-                              0x02,
-                              0x15,
-                              0x00,
-                              0x25,
-                              0x01,
-                              0x09,
-                              0xe9,
-                              0x09,
-                              0xea,
-                              0x09,
-                              0xe2,
-                              0x75,
-                              0x01,
-                              0x95,
-                              0x03,
-                              0x81,
-                              0x02,
-                              0x75,
-                              0x05,
-                              0x95,
-                              0x01,
-                              0x81,
-                              0x03,
-                              0xc0};
+const uint8_t report_map[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(1)), 0x05, 0x0c, 0x09, 0x01, 0xa1, 0x01, 0x85, 0x02,
+    0x15, 0x00, 0x25, 0x01, 0x09, 0xe9, 0x09, 0xea, 0x09, 0xe2, 0x75, 0x01, 0x95, 0x03, 0x81, 0x02,
+    0x75, 0x05, 0x95, 0x01, 0x81, 0x03, 0xc0,
+    // Report ID3: five mouse buttons, signed relative
+    // 16-bit X/Y, signed 8-bit wheel and horizontal pan.
+    0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x85, 0x03, 0x09, 0x01, 0xa1, 0x00, 0x05, 0x09, 0x19, 0x01,
+    0x29, 0x05, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x05, 0x81, 0x02, 0x75, 0x03, 0x95, 0x01,
+    0x81, 0x03, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x16, 0x00, 0x80, 0x26, 0xff, 0x7f, 0x75, 0x10,
+    0x95, 0x02, 0x81, 0x06, 0x09, 0x38, 0x15, 0x80, 0x25, 0x7f, 0x75, 0x08, 0x95, 0x01, 0x81, 0x06,
+    0x05, 0x0c, 0x0a, 0x38, 0x02, 0x81, 0x06, 0xc0, 0xc0};
 const tusb_desc_device_t device = {.bLength = sizeof(tusb_desc_device_t),
                                    .bDescriptorType = TUSB_DESC_DEVICE,
-                                   .bcdUSB = 0x0200,
+                                   .bcdUSB = 0x0201,
                                    .bDeviceClass = TUSB_CLASS_MISC,
                                    .bDeviceSubClass = MISC_SUBCLASS_COMMON,
                                    .bDeviceProtocol = MISC_PROTOCOL_IAD,
@@ -85,8 +65,23 @@ bool enabled = true;
 std::atomic<bool> completed{false};
 std::atomic<bool> failed{false};
 std::atomic<uint32_t> link_epoch{0};
+std::atomic<uint32_t> cdc_epoch{0};
+std::atomic<bool> cdc_dtr{false};
 std::atomic<bool> neutral_delivered{false};
-void OnUsbEvent(tinyusb_event_t*, void*) { ++link_epoch; }
+std::atomic<uint32_t> usb_os_flags{0};
+std::atomic<unsigned> usb_os{0};
+std::atomic<int64_t> usb_descriptor_seen{0};
+void OnUsbEvent(tinyusb_event_t*, void*) {
+    ++link_epoch;
+    ++cdc_epoch;
+}
+void OnCdcLineState(int, cdcacm_event_t* event) {
+    if (event && event->type == CDC_EVENT_LINE_STATE_CHANGED) {
+        const bool dtr = event->line_state_changed_data.dtr;
+        if (cdc_dtr.exchange(dtr) != dtr)
+            ++cdc_epoch;
+    }
+}
 
 void ReleaseLocked() {
     neutral_delivered = false;
@@ -132,12 +127,18 @@ void Worker(void*) {
             esp_restart();
         }
         const uint32_t now_epoch = link_epoch.load();
+        if (tud_mounted() && esp_timer_get_time() - usb_descriptor_seen.load() >= 200000)
+            usb_os = cube_dongle::ClassifyUsbOs(usb_os_flags.load());
         if (epoch != now_epoch) {
             std::lock_guard<std::mutex> lock(mutex);
             ReleaseLocked();
             inflight = false;
             phase = 0;
             epoch = now_epoch;
+            if (!tud_mounted()) {
+                usb_os_flags = 0;
+                usb_os = 0;
+            }
             completed = false;
         }
         if (failed.exchange(false)) {
@@ -151,7 +152,7 @@ void Worker(void*) {
             inflight = false;
             if (ticket != revision)
                 phase = 0;
-            else if (++phase == 2) {
+            else if (++phase == 3) {
                 if (frames.Front() && frames.Front()->Neutral())
                     neutral_delivered = true;
                 frames.Pop();
@@ -171,10 +172,12 @@ void Worker(void*) {
                     phase = 0;
                 } else {
                     completed = false;
-                    const uint8_t id = phase == 0 ? (boot ? 0 : 1) : 2;
+                    const auto pointer = cube_dongle::PointerBytes(front->pointer);
+                    const uint8_t id = phase == 0 ? (boot ? 0 : 1) : phase == 1 ? 2 : 3;
                     const void* body = phase == 0 ? static_cast<const void*>(front->keyboard.data())
-                                                  : &front->media;
-                    inflight = tud_hid_report(id, body, phase == 0 ? 8 : 1);
+                                       : phase == 1 ? static_cast<const void*>(&front->media)
+                                                    : static_cast<const void*>(pointer.data());
+                    inflight = tud_hid_report(id, body, phase == 0 ? 8 : phase == 1 ? 1 : 7);
                 }
             }
         }
@@ -182,6 +185,28 @@ void Worker(void*) {
     }
 }
 }  // namespace
+extern "C" bool __real_tud_control_xfer(uint8_t, const tusb_control_request_t*, void*, uint16_t);
+extern "C" bool __wrap_tud_control_xfer(uint8_t port, const tusb_control_request_t* request,
+                                        void* buffer, uint16_t length) {
+    if (request && request->bmRequestType == 0x80 && request->bRequest == 6) {
+        const auto signal =
+            cube_dongle::UsbDescriptorObservation(request->wValue >> 8, request->wLength);
+        if (signal) {
+            usb_os_flags.fetch_or(signal);
+            usb_descriptor_seen = esp_timer_get_time();
+        }
+    }
+    return __real_tud_control_xfer(port, request, buffer, length);
+}
+extern "C" const uint8_t* tud_descriptor_bos_cb() {
+    // Valid USB2 extension descriptor with no unsupported LPM capability.
+    static const uint8_t bos[] = {5, 15, 12, 0, 1, 7, 16, 2, 0, 0, 0, 0};
+    return bos;
+}
+unsigned CubeUsbDetectedOs() { return usb_os.load(); }
+bool CubeUsbPointerReady() {
+    return tud_mounted() && !tud_suspended() && tud_hid_get_protocol() == HID_PROTOCOL_REPORT;
+}
 
 extern "C" const uint8_t* tud_hid_descriptor_report_cb(uint8_t) { return report_map; }
 extern "C" uint16_t tud_hid_get_report_cb(uint8_t, uint8_t id, hid_report_type_t type,
@@ -192,11 +217,18 @@ extern "C" uint16_t tud_hid_get_report_cb(uint8_t, uint8_t id, hid_report_type_t
     portENTER_CRITICAL(&cache_mux);
     frame = report_cache;
     portEXIT_CRITICAL(&cache_mux);
-    const uint16_t size = (id == 0 || id == 1) ? 8 : id == 2 ? 1 : 0;
+    // GET_REPORT reads held state only; never replay already queued relative motion.
+    auto pointer_report = frame.pointer;
+    pointer_report.x = pointer_report.y = 0;
+    pointer_report.wheel = pointer_report.pan = 0;
+    const auto pointer = cube_dongle::PointerBytes(pointer_report);
+    const uint16_t size = (id == 0 || id == 1) ? 8 : id == 2 ? 1 : id == 3 ? 7 : 0;
     if (!size || max < size)
         return 0;
-    std::memcpy(buffer, size == 8 ? static_cast<const void*>(frame.keyboard.data()) : &frame.media,
-                size);
+    const void* body = id == 3     ? static_cast<const void*>(pointer.data())
+                       : size == 8 ? static_cast<const void*>(frame.keyboard.data())
+                                   : static_cast<const void*>(&frame.media);
+    std::memcpy(buffer, body, size);
     return size;
 }
 extern "C" void tud_hid_set_report_cb(uint8_t, uint8_t, hid_report_type_t, const uint8_t*,
@@ -222,6 +254,7 @@ bool StartCubeUsbDongle() {
         return false;
     tinyusb_config_cdcacm_t cdc{};
     cdc.cdc_port = TINYUSB_CDC_ACM_0;
+    cdc.callback_line_state_changed = OnCdcLineState;
     if (tinyusb_cdcacm_init(&cdc) != ESP_OK) {
         tinyusb_driver_uninstall();
         return false;
@@ -251,16 +284,16 @@ void CubeCdcWrite(const char* bytes, size_t size) {
     if (!CubeCdcWritePacket(reinterpret_cast<const uint8_t*>(bytes), size))
         ESP_LOGW(kTag, "CDC reply interrupted");
 }
-uint32_t CubeUsbEpoch() { return link_epoch.load(); }
+uint32_t CubeUsbEpoch() { return cdc_epoch.load(); }
 bool CubeCdcWritePacket(const uint8_t* bytes, size_t size, uint32_t expected_epoch) {
     if (!bytes || size > 8194)
         return false;
     if (expected_epoch == UINT32_MAX)
-        expected_epoch = link_epoch.load();
+        expected_epoch = cdc_epoch.load();
     const int64_t deadline = esp_timer_get_time() + 2000000;
     size_t at = 0;
     while (at < size) {
-        if (!tud_mounted() || link_epoch.load() != expected_epoch ||
+        if (!tud_mounted() || cdc_epoch.load() != expected_epoch ||
             esp_timer_get_time() >= deadline)
             return false;
         const size_t chunk = std::min(size - at, size_t(64));
@@ -273,7 +306,7 @@ bool CubeCdcWritePacket(const uint8_t* bytes, size_t size, uint32_t expected_epo
             vTaskDelay(pdMS_TO_TICKS(2));
     }
     return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(200)) == ESP_OK &&
-           link_epoch.load() == expected_epoch;
+           cdc_epoch.load() == expected_epoch;
 }
 void CubeUsbSubmit(const cube_dongle::ReportFrame& frame) {
     std::lock_guard<std::mutex> lock(mutex);

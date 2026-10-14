@@ -9,11 +9,14 @@ void CubeBleHostSync(uint8_t address_type);
 void CubeBleHostReset();
 void CubeDualTick();
 void CubeDualSubmit(const cube_dongle::ReportFrame& frame, uint16_t actions);
+bool CubeDualPointer(const cube_dongle::PointerReport& pointer);  // NimBLE host only.
+void CubeDualActions(uint16_t actions);
 void CubeDualSetNeutral(bool neutral);
 void CubeDualRequireNeutral();
 std::string CubeDualCommand(const std::string& line);
 uint32_t CubeDualNotice();
 bool CubeDualEnabled();
+uint8_t CubeDualBoundProfiles();
 bool CubeDualUsesBle();
 bool CubeDualBleReady();
 int CubeDualProfile();

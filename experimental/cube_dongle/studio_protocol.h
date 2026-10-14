@@ -29,16 +29,22 @@ public:
         size_t at = 0;
         while (at < size) {
             uint64_t key;
-            if (!Varint(data, size, at, key) || !key || key > UINT32_MAX ||
-                count_ == fields_.size())
+            if (!Varint(data, size, at, key) || !key || key > UINT32_MAX || count_ == 128)
                 return;
-            auto& f = fields_[count_++];
+            const auto tag = key >> 3;
+            if (count_ >= fields_.size() &&
+                std::find(repeated.begin(), repeated.end(), tag) == repeated.end())
+                return;
+            if (count_ >= fields_.size())
+                extra_.push_back({});
+            auto& f = count_ < fields_.size() ? fields_[count_] : extra_.back();
+            ++count_;
             f.tag = key >> 3;
             f.wire = key & 7;
             if (!f.tag)
                 return;
             for (size_t i = 0; i + 1 < count_; ++i)
-                if (fields_[i].tag == f.tag &&
+                if (At(i).tag == f.tag &&
                     std::find(repeated.begin(), repeated.end(), f.tag) == repeated.end())
                     return;
             if (f.wire == 0) {
@@ -65,8 +71,8 @@ public:
     bool valid = false;
     const Field* Get(uint32_t tag) const {
         for (size_t i = 0; i < count_; ++i)
-            if (fields_[i].tag == tag)
-                return &fields_[i];
+            if (At(i).tag == tag)
+                return &At(i);
         return nullptr;
     }
     uint64_t Value(uint32_t tag) const {
@@ -85,12 +91,15 @@ public:
     std::vector<Field> Repeated(uint32_t tag) const {
         std::vector<Field> result;
         for (size_t i = 0; i < count_; ++i)
-            if (fields_[i].tag == tag)
-                result.push_back(fields_[i]);
+            if (At(i).tag == tag)
+                result.push_back(At(i));
         return result;
     }
 
 private:
+    const Field& At(size_t i) const {
+        return i < fields_.size() ? fields_[i] : extra_[i - fields_.size()];
+    }
     static bool Varint(const uint8_t* data, size_t size, size_t& at, uint64_t& value) {
         value = 0;
         for (unsigned i = 0; i < 10 && at < size; ++i) {
@@ -104,6 +113,8 @@ private:
         return false;
     }
     std::array<Field, 16> fields_{};
+    std::vector<Field>
+        extra_;  // Only explicitly declared repeated fields may overflow the inline array.
     size_t count_ = 0;
 };
 inline void Varint(Bytes& out, uint64_t value) {
@@ -196,6 +207,7 @@ private:
 
 constexpr uint32_t kKp = 1, kMo = 2, kTransparent = 3, kNone = 4, kBt = 5;
 constexpr uint32_t kRuntimeMacro = 6;
+constexpr uint32_t kModTap = 7, kLayerTap = 8;
 inline uint32_t Behavior(const Binding& b) {
     switch (b.kind) {
         case Kind::Key:
@@ -209,6 +221,10 @@ inline uint32_t Behavior(const Binding& b) {
             return kBt;
         case Kind::RuntimeMacro:
             return kRuntimeMacro;
+        case Kind::ModTap:
+            return kModTap;
+        case Kind::LayerTap:
+            return kLayerTap;
         default:
             return kNone;
     }
@@ -224,11 +240,17 @@ inline uint32_t Param1(const Binding& b) {
             return b.value;
         case Kind::HostAction:
             return b.value < 5 ? 3 : b.value == 5 ? 0 : 4;
+        case Kind::ModTap:
+            return 0x70000 | (b.value >> 8);
+        case Kind::LayerTap:
+            return b.value >> 8;
         default:
             return 0;
     }
 }
 inline uint32_t Param2(const Binding& b) {
+    if (b.kind == Kind::ModTap || b.kind == Kind::LayerTap)
+        return 0x70000 | (b.value & 255) | (uint32_t(b.modifiers) << 24);
     return b.kind == Kind::HostAction && b.value < 5 ? b.value : 0;
 }
 inline bool BindingFromWire(uint64_t encoded_id, uint64_t p1, uint64_t p2, Binding& out) {
@@ -257,6 +279,18 @@ inline bool BindingFromWire(uint64_t encoded_id, uint64_t p1, uint64_t p2, Bindi
     } else if (id == kRuntimeMacro && p1 < 8 && !p2) {
         out = {Kind::RuntimeMacro, uint16_t(p1), 0};
         return true;
+    } else if (id == kModTap || id == kLayerTap) {
+        Binding tap;
+        if (!BindingFromWire(kKp * 2, p2, 0, tap) || tap.kind != Kind::Key || tap.value >= 0xe0)
+            return false;
+        if (id == kModTap && p1 >= 0x700e0 && p1 <= 0x700e7) {
+            out = {Kind::ModTap, uint16_t(((p1 & 255) << 8) | tap.value), tap.modifiers};
+            return true;
+        }
+        if (id == kLayerTap && p1 < 4) {
+            out = {Kind::LayerTap, uint16_t((p1 << 8) | tap.value), tap.modifiers};
+            return true;
+        }
     } else if (id == kBt) {
         if (p1 == 3 && p2 < 5) {
             out = {Kind::HostAction, uint16_t(p2), 0};
@@ -367,7 +401,7 @@ struct Model {
                 const uint16_t low = data[at++];
                 const uint16_t value = low | (uint16_t(data[at++]) << 8);
                 const uint8_t mods = data[at++];
-                if (kind > unsigned(Kind::RuntimeMacro))
+                if (kind > unsigned(Kind::LayerTap))
                     return false;
                 b = {Kind(kind), value, mods};
                 Binding check;
@@ -439,6 +473,12 @@ public:
     }
     bool Unlocked() const { return unlocked_; }
     bool Dirty() const { return model.Export() != saved_; }
+    Model SavedModel() const {
+        Model saved;
+        saved.Load(saved_);
+        return saved;
+    }
+    static Bytes BehaviorDetails(uint32_t id) { return id >= 1 && id <= 8 ? Details(id) : Bytes{}; }
     Bytes LockState(bool value) {
         unlocked_ = value;
         Bytes core;
@@ -528,7 +568,7 @@ public:
         } else if (subsystem->tag == 4) {
             if (op->tag == 1 && op->wire == 0) {
                 Bytes list;
-                for (uint32_t b = 1; b <= 6; ++b)
+                for (uint32_t b = 1; b <= 8; ++b)
                     Number(list, 1, b);
                 Message(reply, 1, list);
             } else if (op->tag == 2 && op->wire == 2) {
@@ -536,7 +576,7 @@ public:
                 if (!detail.valid || !detail.Numbers({1}))
                     return Error(id, 3);
                 auto b = detail.Value(1);
-                if (b < 1 || b > 6)
+                if (b < 1 || b > 8)
                     return Error(id, 2);
                 Message(reply, 2, Details(b));
             } else
@@ -699,8 +739,15 @@ private:
     static Bytes Details(uint32_t id) {
         Bytes out;
         Number(out, 1, id);
-        const char* names[] = {"",     "Key Press", "Momentary Layer", "Transparent",
-                               "None", "Bluetooth", "Runtime Macro"};
+        const char* names[] = {"",
+                               "Key Press",
+                               "Momentary Layer",
+                               "Transparent",
+                               "None",
+                               "Bluetooth",
+                               "Runtime Macro",
+                               "Mod Tap (hold-preferred)",
+                               "Layer Tap (hold-preferred)"};
         Text(out, 2, names[id]);
         if (id == kKp) {
             Bytes set;
@@ -715,6 +762,27 @@ private:
                 Text(constant, 1, v == 0xe9 ? "Volume Up" : v == 0xea ? "Volume Down" : "Mute");
                 Message(set, 1, constant);
             }
+            Message(out, 3, set);
+        } else if (id == kModTap || id == kLayerTap) {
+            Bytes set, hold, tap, hid;
+            const char* modifier_names[] = {"Left Ctrl",  "Left Shift",  "Left Alt",  "Left GUI",
+                                            "Right Ctrl", "Right Shift", "Right Alt", "Right GUI"};
+            if (id == kLayerTap)
+                Message(hold, 6, {});
+            else {
+                for (uint32_t usage = 0xe0; usage <= 0xe7; ++usage) {
+                    Bytes modifier;
+                    Number(modifier, 3, 0x70000 | usage);
+                    Text(modifier, 1, modifier_names[usage - 0xe0]);
+                    Message(set, 1, modifier);
+                }
+            }
+            if (id == kLayerTap)
+                Message(set, 1, hold);
+            Number(hid, 1, 0xdf);
+            Number(hid, 2, 0);
+            Message(tap, 5, hid);
+            Message(set, 2, tap);
             Message(out, 3, set);
         } else if (id == kRuntimeMacro) {
             Bytes set, slot, range;

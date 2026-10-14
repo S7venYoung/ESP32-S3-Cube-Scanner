@@ -32,7 +32,7 @@ class StudioIntegrationTest(unittest.TestCase):
         self.assertIn('CubeUsbEpoch(), CubeBleStudioEpoch()', source)
         self.assertIn('session.epoch != epochs[i]', source)
         self.assertIn('CubeCdcWritePacket(bytes.data(), bytes.size(), sessions[transport].epoch)', source)
-        self.assertIn('link_epoch.load() != expected_epoch', usb)
+        self.assertIn('cdc_epoch.load() != expected_epoch', usb)
 
     def test_combo_pipeline_preserves_taps_and_ticks_on_host_thread(self):
         source = (ROOT / 'main/scanner/cube_studio.cc').read_text()
@@ -50,4 +50,8 @@ class StudioIntegrationTest(unittest.TestCase):
         for name in ('build-cube-dual-candidate.yml', 'build-cube-dongle-bench.yml', 'test-cube-dongle.yml'):
             source = (ROOT / '.github/workflows' / name).read_text()
             self.assertIn('workflow_dispatch:', source)
-            self.assertNotIn('  push:', source)
+            if name == 'build-cube-dual-candidate.yml':
+                self.assertIn('branches: [codex/xingzhi-cube-dongle]', source)
+                self.assertIn('paths: [.github/cube-final-build-request]', source)
+            else:
+                self.assertNotIn('  push:', source)

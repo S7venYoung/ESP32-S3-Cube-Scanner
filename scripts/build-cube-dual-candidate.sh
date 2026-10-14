@@ -11,6 +11,12 @@ g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/runtime_macros_tes
 /tmp/cube-runtime-macros-test
 g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/runtime_combos_test.cc -o /tmp/cube-runtime-combos-test
 /tmp/cube-runtime-combos-test
+g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/hold_tap_test.cc -o /tmp/cube-hold-tap-test
+/tmp/cube-hold-tap-test
+for extra in split_relay peripheral_rpc dya_extended runtime_pointer runtime_sensors custom_settings host_os; do
+    g++ -std=c++17 -Wall -Wextra -Werror "experimental/cube_dongle/${extra}_test.cc" -o "/tmp/cube-${extra}-test"
+    "/tmp/cube-${extra}-test"
+done
 python scripts/build.py nologo/xingzhi-cube-1.54tft-wifi --name xingzhi-cube-1.54tft-wifi-dual-dongle-candidate --language zh-CN --wake-word nihaoxiaozhi
 grep -qx 'CONFIG_CUBE_BLE_DONGLE_OUTPUT=y' sdkconfig
 grep -qx 'CONFIG_CUBE_SPLIT_AUTO_BIND=y' sdkconfig

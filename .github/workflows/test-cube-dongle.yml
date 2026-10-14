@@ -29,6 +29,12 @@ jobs:
           /tmp/cube-runtime-macros-test
           clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/runtime_combos_test.cc -o /tmp/cube-runtime-combos-test
           /tmp/cube-runtime-combos-test
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/hold_tap_test.cc -o /tmp/cube-hold-tap-test
+          /tmp/cube-hold-tap-test
+          for extra in split_relay peripheral_rpc dya_extended runtime_pointer runtime_sensors custom_settings host_os; do
+            clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined "experimental/cube_dongle/${extra}_test.cc" -o "/tmp/cube-${extra}-test"
+            "/tmp/cube-${extra}-test"
+          done
       - name: Check build configuration and USB diagnostic parsing
         run: |
           python3 -m venv /tmp/cube-studio-proto

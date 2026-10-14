@@ -1,12 +1,16 @@
 #pragma once
+#include "optional_input.h"
 #include "split_state.h"
 
 namespace cube_dongle {
 struct ReportFrame {
     KeyboardReport keyboard{};
     uint8_t media = 0;
+    PointerReport pointer{};
+    bool Motion() const { return pointer.x || pointer.y || pointer.wheel || pointer.pan; }
     bool operator==(const ReportFrame& other) const {
-        return keyboard == other.keyboard && media == other.media;
+        return keyboard == other.keyboard && media == other.media &&
+               PointerBytes(pointer) == PointerBytes(other.pointer);
     }
     bool Neutral() const { return *this == ReportFrame{}; }
 };
@@ -22,8 +26,33 @@ public:
                 return false;
             inhibited_ = false;
         }
-        if (frame == latest_)
+        const auto same_state = [](const ReportFrame& a, const ReportFrame& b) {
+            return a.keyboard == b.keyboard && a.media == b.media &&
+                   a.pointer.buttons == b.pointer.buttons;
+        };
+        // A zero delta is not a mouse release. Suppress it when held state did
+        // not change, rather than spending three USB/BLE transfers per tick.
+        if (!frame.Motion() && same_state(frame, latest_))
             return true;
+        if (frame.Motion() && count_ > 1) {
+            auto& tail = frames_[(head_ + count_ - 1) % Capacity];
+            const int x = int(tail.pointer.x) + frame.pointer.x,
+                      y = int(tail.pointer.y) + frame.pointer.y;
+            const int wheel = int(tail.pointer.wheel) + frame.pointer.wheel,
+                      pan = int(tail.pointer.pan) + frame.pointer.pan;
+            // Never mutate Front(): its pointer report may already be in flight.
+            // Combine only additive deltas with identical key/button state.
+            if (tail.Motion() && same_state(tail, frame) && x >= -32768 && x <= 32767 &&
+                y >= -32768 && y <= 32767 && wheel >= -128 && wheel <= 127 && pan >= -128 &&
+                pan <= 127) {
+                tail.pointer.x = x;
+                tail.pointer.y = y;
+                tail.pointer.wheel = wheel;
+                tail.pointer.pan = pan;
+                latest_ = tail;
+                return true;
+            }
+        }
         if (count_ == Capacity) {
             ReleaseAndInhibit();
             return false;

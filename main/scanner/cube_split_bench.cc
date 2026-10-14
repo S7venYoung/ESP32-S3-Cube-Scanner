@@ -12,10 +12,12 @@
 #include "cube_studio.h"
 #endif
 #include "../../experimental/cube_dongle/peer_binding.h"
+#include "../../experimental/cube_dongle/split_relay.h"
 #include "../../experimental/cube_dongle/velvet_positions.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <host/ble_att.h>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
 #include <host/ble_hs.h>
@@ -30,6 +32,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <mutex>
 
 extern "C" void ble_store_config_init(void);
@@ -53,6 +56,18 @@ enum class Phase {
     Closing
 };
 struct Peer {
+    struct Channel {
+        uint16_t value = 0, end = 0, ccc = 0;
+        uint8_t kind = 0;
+        uint8_t device = 0;
+        bool subscribed = false;
+    };
+    std::array<Channel, 6> channels{};
+    size_t channel_count = 0, channel_at = 0;
+    cube_dongle::SplitRelay relay;
+    uint8_t relay_sequence = 0;
+    bool caps_requested = false;
+    bool optional_pending = false, caps_pending = false;
     ble_addr_t address{};
     bool configured = false;
     bool auto_allowed = false, learning = false, identity_seen = false, identity_verified = false;
@@ -71,10 +86,25 @@ struct Peer {
     bool battery_pending = false;
 };
 Peer peers[2];
+std::atomic<uint8_t> relay_ready{0};
+std::array<std::atomic<uintptr_t>, 2> relay_generations{};
+struct RelayJob {
+    size_t side;
+    std::string name;
+    std::vector<uint8_t> data;
+    uintptr_t generation;
+};
+std::mutex relay_jobs_mutex;
+std::deque<RelayJob> relay_jobs;
+std::atomic<uint32_t> forget_requested{0}, forget_done{0};
+std::atomic<bool> forget_success{false};
+std::atomic<int64_t> forget_deadline{0};
 cube_dongle::AutoCandidate candidates[2];
 std::mutex binding_mutex;
 const ble_uuid128_t kIdentity = BLE_UUID128_INIT(0x43, 0x56, 0x50, 0x31, 0x6f, 0x37, 0x4d, 0x91,
                                                  0xa6, 0x2e, 0x88, 0x05, 0xd4, 0x73, 0x9b, 0xc1);
+const ble_uuid128_t kCapabilities = BLE_UUID128_INIT(
+    0x43, 0x56, 0x50, 0x31, 0x6f, 0x37, 0x4d, 0x91, 0xa6, 0x2e, 0x88, 0x05, 0xd4, 0x73, 0x9b, 0xc2);
 cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
 #if CONFIG_CUBE_STUDIO_RPC
 cube_dongle::KeyboardState<61, 4> keyboard(cube_dongle::VelvetStudioKeymap());
@@ -108,9 +138,10 @@ void PublishKeyboard() {
 #endif
     auto publish = [&](const cube_dongle::SplitState::Snapshot& snapshot, uint16_t actions) {
         (void)actions;
-        keyboard.Apply(snapshot);
+        keyboard.Apply(snapshot, uint32_t(esp_timer_get_time() / 1000));
 #if CONFIG_CUBE_STUDIO_RPC
         CubeStudioMacroTriggers(keyboard);
+        CubeStudioStreamPositions(physical, keyboard);
 #endif
         cube_dongle::ReportFrame report{keyboard.Report(), keyboard.MediaReport()};
 #if CONFIG_CUBE_STUDIO_RPC
@@ -127,6 +158,20 @@ void PublishKeyboard() {
                      keyboard.Actions());
 #endif
 #endif
+        if (keyboard.FlushTaps()) {
+            cube_dongle::ReportFrame released{keyboard.Report(), keyboard.MediaReport()};
+#if CONFIG_CUBE_STUDIO_RPC
+            released = cube_dongle::studio::MergeReports(released, extra);
+#endif
+            keyboard_output = released;
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+            CubeDualSubmit(released, 0);
+#else
+            CubeUsbSubmit(released);
+#endif
+#endif
+        }
     };
     bool pulse = false;
     auto tapped = filtered;
@@ -225,10 +270,170 @@ bool Encrypted(const Peer& peer) {
            std::memcmp(desc.peer_id_addr.val, peer.address.val, 6) == 0 &&
            (desc.peer_id_addr.type & 1) == peer.address.type;
 }
+void OptionalSubscribe(Peer& peer);
+int OnCapabilities(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void* arg) {
+    auto* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Ready || !Encrypted(*peer))
+        return 0;
+    if (error->status)
+        peer->caps_pending = false;
+    uint8_t caps[6];
+    if (error->status || !attr || !attr->om || OS_MBUF_PKTLEN(attr->om) != 6 ||
+        os_mbuf_copydata(attr->om, 0, 6, caps) || caps[0] != 1 || caps[1] > 2)
+        return 0;
+    bool sensor_ready = false;
+    for (const auto& channel : peer->channels)
+        sensor_ready |= channel.kind == 3 && channel.subscribed;
+#if CONFIG_CUBE_STUDIO_RPC
+    for (unsigned i = 0; i < 2; ++i)
+        CubeStudioSensorHardware(Side(*peer) * 2 + i,
+                                 sensor_ready && i < caps[1]
+                                     ? uint16_t(caps[2 + i * 2] | (uint16_t(caps[3 + i * 2]) << 8))
+                                     : 0);
+#else
+    (void)sensor_ready;
+#endif
+    return 0;
+}
+int OptionalSubscribed(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr*, void* arg) {
+    auto* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Ready || peer->channel_at >= peer->channel_count)
+        return 0;
+    auto& channel = peer->channels[peer->channel_at];
+    peer->optional_pending = false;
+    channel.subscribed = error->status == 0 && Encrypted(*peer);
+#if CONFIG_CUBE_STUDIO_RPC
+    if (channel.kind == 6)
+        CubeStudioPointerHardware(channel.device, channel.subscribed);
+#endif
+    if (channel.subscribed && channel.kind == 7) {
+        relay_generations[Side(*peer)] = peer->generation;
+        relay_ready.fetch_or(1u << Side(*peer));
+    }
+    ++peer->channel_at;
+    OptionalSubscribe(*peer);
+    return 0;
+}
+int OptionalDescriptor(uint16_t conn, const ble_gatt_error* error, uint16_t,
+                       const ble_gatt_dsc* descriptor, void* arg) {
+    auto* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Ready || peer->channel_at >= peer->channel_count)
+        return 0;
+    auto& channel = peer->channels[peer->channel_at];
+    if (!error->status && descriptor) {
+        if (ble_uuid_u16(&descriptor->uuid.u) == 0x2902)
+            channel.ccc = descriptor->handle;
+    } else {
+        peer->optional_pending = false;
+        const uint8_t value[] = {1, 0};
+        if (error->status == BLE_HS_EDONE && channel.ccc) {
+            const auto rc = ble_gattc_write_flat(conn, channel.ccc, value, sizeof(value),
+                                                 OptionalSubscribed, arg);
+            if (!rc) {
+                peer->optional_pending = true;
+                return 0;
+            }
+            if (rc == BLE_HS_EBUSY)
+                return 0;
+        }
+        ++peer->channel_at;
+        OptionalSubscribe(*peer);
+    }
+    return 0;
+}
+void OptionalSubscribe(Peer& peer) {
+    if (peer.optional_pending || peer.caps_pending)
+        return;
+    while (peer.channel_at < peer.channel_count) {
+        auto& channel = peer.channels[peer.channel_at];
+        if (channel.ccc) {
+            const uint8_t value[] = {1, 0};
+            const auto rc = ble_gattc_write_flat(peer.connection, channel.ccc, value, sizeof(value),
+                                                 OptionalSubscribed, Cookie(Side(peer)));
+            if (!rc) {
+                peer.optional_pending = true;
+                return;
+            }
+            if (rc == BLE_HS_EBUSY)
+                return;
+            ++peer.channel_at;
+            continue;
+        }
+        if (channel.end > channel.value) {
+            const auto rc = ble_gattc_disc_all_dscs(peer.connection, channel.value, channel.end,
+                                                    OptionalDescriptor, Cookie(Side(peer)));
+            if (!rc) {
+                peer.optional_pending = true;
+                return;
+            }
+            if (rc == BLE_HS_EBUSY)
+                return;
+        }
+        ++peer.channel_at;
+    }
+    if (!peer.caps_requested) {
+        const auto rc = ble_gattc_read_by_uuid(peer.connection, 1, 0xffff, &kCapabilities.u,
+                                               OnCapabilities, Cookie(Side(peer)));
+        if (!rc) {
+            peer.caps_requested = true;
+            peer.caps_pending = true;
+        } else if (rc != BLE_HS_EBUSY)
+            peer.caps_requested = true;
+    }
+}
+void PumpRelayJobs() {
+    static RelayJob job{};
+    static std::vector<std::vector<uint8_t>> chunks;
+    static size_t chunk_at = 0;
+    static uint16_t value_handle = 0;
+    static int64_t deadline = 0;
+    if (chunks.empty()) {
+        std::lock_guard<std::mutex> lock(relay_jobs_mutex);
+        if (relay_jobs.empty())
+            return;
+        job = std::move(relay_jobs.front());
+        relay_jobs.pop_front();
+        chunk_at = 0;
+        value_handle = 0;
+        deadline = esp_timer_get_time() + 2000000;
+    }
+    auto& peer = peers[job.side];
+    if (peer.phase != Phase::Ready || peer.generation != job.generation || !Encrypted(peer) ||
+        esp_timer_get_time() >= deadline) {
+        chunks.clear();
+        return;
+    }
+    if (chunks.empty()) {
+        for (const auto& channel : peer.channels) {
+            if (channel.kind == 7 && channel.subscribed) {
+                value_handle = channel.value;
+                chunks = cube_dongle::SplitRelay::Encode(
+                    job.name, job.data, ble_att_mtu(peer.connection), peer.relay_sequence);
+                break;
+            }
+        }
+        if (chunks.empty())
+            return;
+    }
+    const auto& chunk = chunks[chunk_at];
+    const auto rc =
+        ble_gattc_write_no_rsp_flat(peer.connection, value_handle, chunk.data(), chunk.size());
+    if (!rc) {
+        if (++chunk_at == chunks.size())
+            chunks.clear();
+    } else if (rc != BLE_HS_EBUSY && rc != BLE_HS_EAGAIN && rc != BLE_HS_ENOMEM) {
+        chunks.clear();
+    }
+}
 void Fail(Peer& peer, const char* reason) {
+    relay_ready.fetch_and(~(1u << Side(peer)));
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
     input.Disconnect(Side(peer));
 #if CONFIG_CUBE_STUDIO_RPC
+    for (unsigned index = Side(peer) * 2; index < Side(peer) * 2 + 2; ++index)
+        CubeStudioPointerHardware(index, false);
+    for (unsigned index = Side(peer) * 2; index < Side(peer) * 2 + 2; ++index)
+        CubeStudioSensorHardware(index, 0);
     CubeStudioCancelMacros();
 #endif
     peer.typing.Reset();
@@ -303,7 +508,9 @@ void TelemetryTick(ble_npl_event*) {
     static const ble_uuid16_t battery_uuid = BLE_UUID16_INIT(0x2a19);
     for (size_t side = 0; side < 2; ++side) {
         auto& peer = peers[side];
-        if (peer.phase == Phase::Ready && !peer.battery_pending && now >= peer.battery_next) {
+        if (peer.phase == Phase::Ready && peer.caps_requested && !peer.caps_pending &&
+            !peer.optional_pending && peer.channel_at == peer.channel_count &&
+            !peer.battery_pending && now >= peer.battery_next) {
             peer.battery_next = now + 30000000;
             peer.battery_pending = true;
             if (ble_gattc_read_by_uuid(peer.connection, 1, 0xffff, &battery_uuid.u, OnBattery,
@@ -382,6 +589,7 @@ int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void
     peer->phase = Phase::Ready;
     PublishStatus();
     ble_npl_callout_stop(&peer->timeout);
+    OptionalSubscribe(*peer);
     ESP_LOGI(kTag, "%s ready, encrypted input only; HID OFF", Side(*peer) ? "right" : "left");
     return 0;
 }
@@ -420,6 +628,35 @@ int OnCharacteristic(uint16_t conn, const ble_gatt_error* error, const ble_gatt_
     if (!peer || peer->phase != Phase::Characteristic)
         return 0;
     if (!error->status && chr) {
+        for (size_t i = 0; i < peer->channel_count; ++i)
+            if (chr->def_handle > peer->channels[i].value)
+                peer->channels[i].end =
+                    std::min<uint16_t>(peer->channels[i].end, chr->def_handle - 1);
+        const auto* uuid = &chr->uuid.u;
+        if (uuid->type == BLE_UUID_TYPE_128 && (chr->properties & BLE_GATT_CHR_PROP_NOTIFY)) {
+            const auto* raw = reinterpret_cast<const ble_uuid128_t*>(uuid)->value;
+            const auto kind = raw[12];
+            auto expected = kPosition;
+            expected.value[12] = kind;
+            if ((kind == 3 || kind == 6 || kind == 7) && !ble_uuid_cmp(uuid, &expected.u) &&
+                peer->channel_count < peer->channels.size()) {
+                auto& channel = peer->channels[peer->channel_count++];
+                unsigned ordinal = 0;
+                for (size_t i = 0; i + 1 < peer->channel_count; ++i)
+                    if (peer->channels[i].kind == 6)
+                        ++ordinal;
+                if (kind == 6 && ordinal >= 2) {
+                    --peer->channel_count;
+                    return 0;
+                }
+                channel = {chr->val_handle,
+                           peer->service_end,
+                           0,
+                           kind,
+                           uint8_t(Side(*peer) * 2 + ordinal),
+                           false};
+            }
+        }
         if (ble_uuid_cmp(&chr->uuid.u, &kPosition.u) == 0) {
             if ((chr->properties & (BLE_GATT_CHR_PROP_READ | BLE_GATT_CHR_PROP_NOTIFY)) !=
                 (BLE_GATT_CHR_PROP_READ | BLE_GATT_CHR_PROP_NOTIFY)) {
@@ -593,6 +830,12 @@ int OnGap(ble_gap_event* event, void* arg) {
             peer.phase = Phase::Security;
             peer.service_start = peer.service_end = peer.value = peer.ccc = 0;
             peer.notified_during_read = false;
+            peer.channels = {};
+            peer.channel_count = peer.channel_at = 0;
+            peer.caps_requested = false;
+            peer.optional_pending = peer.caps_pending = false;
+            peer.relay.Reset();
+            relay_ready.fetch_and(~(1u << (cookie & 1)));
             ble_npl_callout_reset(&peer.timeout, ble_npl_time_ms_to_ticks32(15000));
             if (Encrypted(peer))
                 Discover(peer);
@@ -604,6 +847,10 @@ int OnGap(ble_gap_event* event, void* arg) {
                peer.connection == event->disconnect.conn.conn_handle) {
         input.Disconnect(cookie & 1);
 #if CONFIG_CUBE_STUDIO_RPC
+        for (unsigned index = (cookie & 1) * 2; index < (cookie & 1) * 2 + 2; ++index)
+            CubeStudioPointerHardware(index, false);
+        for (unsigned index = (cookie & 1) * 2; index < (cookie & 1) * 2 + 2; ++index)
+            CubeStudioSensorHardware(index, 0);
         CubeStudioCancelMacros();
 #endif
         peer.typing.Reset();
@@ -611,6 +858,8 @@ int OnGap(ble_gap_event* event, void* arg) {
         peer.battery_seen = -1;
         peer.battery_next = 0;
         peer.battery_pending = false;
+        relay_ready.fetch_and(~(1u << (cookie & 1)));
+        peer.relay.Reset();
         PublishKeyboard();
         ble_npl_callout_stop(&peer.timeout);
         peer.connection = BLE_HS_CONN_HANDLE_NONE;
@@ -635,6 +884,33 @@ int OnGap(ble_gap_event* event, void* arg) {
             Fail(peer, "invalid position notification");
         else if (peer.phase == Phase::Reading)
             peer.notified_during_read = true;
+    } else if (event->type == BLE_GAP_EVENT_NOTIFY_RX && peer.phase == Phase::Ready &&
+               peer.connection == event->notify_rx.conn_handle && Encrypted(peer)) {
+        for (size_t i = 0; i < peer.channel_count; ++i) {
+            const auto& channel = peer.channels[i];
+            if (!channel.subscribed || channel.value != event->notify_rx.attr_handle)
+                continue;
+            std::array<uint8_t, 258> bytes{};
+            const size_t length = OS_MBUF_PKTLEN(event->notify_rx.om);
+            if (length > bytes.size() ||
+                os_mbuf_copydata(event->notify_rx.om, 0, length, bytes.data()))
+                break;
+#if CONFIG_CUBE_STUDIO_RPC
+            if (channel.kind == 7) {
+                std::string name;
+                std::vector<uint8_t> body;
+                if (peer.relay.Feed(bytes.data(), length, name, body))
+                    CubeStudioRelayEvent((cookie & 1) + 1, name, body);
+            } else if (channel.kind == 6) {
+                CubeStudioPointerInput(channel.device, bytes.data(), length,
+                                       keyboard.ActiveLayer());
+            } else if (channel.kind == 3) {
+                CubeStudioSensorInput((cookie & 1) + 1, bytes.data(), length,
+                                      keyboard.ActiveLayer());
+            }
+#endif
+            break;
+        }
     } else if (event->type == BLE_GAP_EVENT_REPEAT_PAIRING) {
         return BLE_GAP_REPEAT_PAIRING_IGNORE;  // Never silently erase working bonds.
     }
@@ -720,6 +996,13 @@ void OnReset(int reason) {
     }
     for (size_t side = 0; side < 2; ++side) {
         input.Disconnect(side);
+#if CONFIG_CUBE_STUDIO_RPC
+        for (unsigned index = side * 2; index < side * 2 + 2; ++index) {
+            CubeStudioPointerHardware(index, false);
+            CubeStudioSensorHardware(index, 0);
+        }
+#endif
+        relay_ready.fetch_and(~(1u << side));
         peers[side].typing.Reset();
         peers[side].battery = -1;
         peers[side].battery_seen = -1;
@@ -738,6 +1021,60 @@ void OnReset(int reason) {
 void Host(void*) {
     nimble_port_run();
     nimble_port_freertos_deinit();
+}
+void PumpForget() {
+    const uint32_t ticket = forget_requested.load();
+    if (!ticket)
+        return;
+    bool okay = esp_timer_get_time() < forget_deadline.load();
+    if (okay && (CubeSplitBenchStatus() >> 8))
+        return;
+    if (okay) {
+        nvs_handle_t handle;
+        std::lock_guard<std::mutex> lock(binding_mutex);
+        okay = nvs_open("cube_split", NVS_READWRITE, &handle) == ESP_OK;
+        if (okay) {
+            for (const char* key : {"left", "right"}) {
+                const auto rc = nvs_erase_key(handle, key);
+                okay &= rc == ESP_OK || rc == ESP_ERR_NVS_NOT_FOUND;
+            }
+            if (okay)
+                okay = nvs_commit(handle) == ESP_OK;
+            nvs_close(handle);
+        }
+        if (okay) {
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+            CubeDualRequireNeutral();
+#endif
+            for (size_t side = 0; side < 2; ++side) {
+                auto& peer = peers[side];
+                input.Disconnect(side);
+                peer.auto_allowed = false;  // Do not immediately re-bind the device just forgotten.
+                if (peer.connection != BLE_HS_CONN_HANDLE_NONE) {
+                    peer.phase = Phase::Closing;
+                    const auto rc = ble_gap_terminate(peer.connection, BLE_ERR_REM_USER_CONN_TERM);
+                    okay &= rc == 0 || rc == BLE_HS_ENOTCONN;
+                }
+                if (peer.configured) {
+                    const auto rc = ble_store_util_delete_peer(&peer.address);
+                    okay &= rc == 0 || rc == BLE_HS_ENOENT;
+                }
+                peer.configured = false;
+                relay_ready.fetch_and(~(1u << side));
+#if CONFIG_CUBE_STUDIO_RPC
+                for (unsigned i = side * 2; i < side * 2 + 2; ++i) {
+                    CubeStudioPointerHardware(i, false);
+                    CubeStudioSensorHardware(i, 0);
+                }
+#endif
+            }
+            PublishKeyboard();
+            PublishStatus();
+        }
+    }
+    forget_success = okay;
+    forget_requested = 0;
+    forget_done = ticket;
 }
 }  // namespace
 
@@ -798,10 +1135,49 @@ void StartCubeSplitBench() {
 
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
 void CubeSplitInputTick() {
+    for (auto& peer : peers)
+        if (peer.phase == Phase::Ready &&
+            (!peer.caps_requested || peer.channel_at < peer.channel_count))
+            OptionalSubscribe(peer);
+    PumpForget();
+    PumpRelayJobs();
 #if CONFIG_CUBE_STUDIO_RPC
-    if (CubeStudioCombosNeedTick())
+    const auto previous_layer = keyboard.ActiveLayer();
+    CubeStudioRefreshKeymap(keyboard);
+    const bool layer_changed = previous_layer != keyboard.ActiveLayer();
+    CubeStudioPointerTick(keyboard.ActiveLayer());
+    const bool sensor_changed = CubeStudioSensorTick();
+    if (layer_changed || sensor_changed || CubeStudioCombosNeedTick() || keyboard.NeedsTick())
         PublishKeyboard();
 #endif
+}
+void CubeSplitCancelHoldTaps() { keyboard.CancelHoldTaps(); }
+bool CubeSplitQueueRelay(unsigned source, const std::string& name,
+                         const std::vector<uint8_t>& data) {
+    if (!source || source > 2 || name.empty() || name.size() > 32 || data.size() > 255 ||
+        !(relay_ready.load() & (1u << (source - 1))))
+        return false;
+    std::lock_guard<std::mutex> lock(relay_jobs_mutex);
+    if (relay_jobs.size() >= 4)
+        return false;
+    relay_jobs.push_back({source - 1, name, data, relay_generations[source - 1].load()});
+    return true;
+}
+bool CubeSplitForgetBonds() {
+    if (forget_requested.load() || (CubeSplitBenchStatus() >> 8))
+        return false;
+    static uint32_t next = 1;
+    const uint32_t ticket = next++;
+    if (!ticket)
+        return false;
+    forget_deadline = esp_timer_get_time() + 1500000;
+    uint32_t expected = 0;
+    if (!forget_requested.compare_exchange_strong(expected, ticket))
+        return false;
+    const int64_t deadline = esp_timer_get_time() + 2000000;
+    while (forget_done.load() != ticket && esp_timer_get_time() < deadline)
+        vTaskDelay(pdMS_TO_TICKS(5));
+    return forget_done.load() == ticket && forget_success.load();
 }
 bool CubeSplitIsKeyboard(const uint8_t* address, uint8_t type) {
     for (const auto& peer : peers)

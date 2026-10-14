@@ -1,6 +1,9 @@
 name: Build Cube USB and BLE dongle candidate
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/xingzhi-cube-dongle]
+    paths: [.github/cube-final-build-request]
 permissions:
   contents: read
 jobs:

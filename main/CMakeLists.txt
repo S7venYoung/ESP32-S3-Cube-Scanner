@@ -1131,6 +1131,9 @@ idf_component_register(SRCS ${SOURCES}
 # dialect; pin the baseline so main/ does not depend on it.
 if(NOT CMAKE_BUILD_EARLY_EXPANSION)
     target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++23>)
+    if(CONFIG_CUBE_USB_DONGLE_OUTPUT)
+        target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=tud_control_xfer")
+    endif()
 endif()
 
 # Use target_compile_definitions to define the reported board identity
