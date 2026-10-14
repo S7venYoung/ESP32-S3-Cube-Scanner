@@ -1,4 +1,7 @@
 #include "cube_split_bench.h"
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+#include "cube_ble_dongle.h"
+#endif
 #include "../../experimental/cube_dongle/typing_activity.h"
 #include "../../experimental/cube_dongle/velvet_keymap.h"
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
@@ -65,10 +68,19 @@ cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 void PublishKeyboard() {
     keyboard.Apply(input.Combined());
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    const auto positions = input.Combined();
+    bool neutral = true;
+    for (auto byte : positions)
+        neutral &= byte == 0;
+    CubeDualSetNeutral(neutral);
+    CubeDualSubmit({keyboard.Report(), keyboard.MediaReport()}, keyboard.Actions());
+#else
     CubeUsbSubmit({keyboard.Report(), keyboard.MediaReport()});
     if (keyboard.Actions())
         ESP_LOGW(kTag, "Host BLE profile command unsupported by USB-only candidate: %u",
                  keyboard.Actions());
+#endif
 #endif
 }
 ble_npl_callout retry;
@@ -117,6 +129,13 @@ void PublishStatus() {
     status.modifiers = fight.modifiers;
     status.left_battery = fight.left_battery;
     status.right_battery = fight.right_battery;
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    status.profile = CubeDualProfile() + 1;
+    status.usb = !CubeDualUsesBle() && CubeUsbConnected() && CubeDualEnabled();
+    status.ble = CubeDualUsesBle() && CubeDualBleReady() && CubeDualEnabled();
+#elif CONFIG_CUBE_USB_DONGLE_OUTPUT
+    status.usb = CubeUsbConnected() && CubeUsbEnabled();
+#endif
     // Split links are not the computer's Bluetooth HID connection.
     std::lock_guard<std::mutex> lock(telemetry_mutex);
     fight_cache = fight;
@@ -463,6 +482,9 @@ void LoadBinding(Peer& peer, const char* key, const char* fallback, int fallback
 void OnSync() {
     if (ble_hs_util_ensure_addr(0) || ble_hs_id_infer_auto(0, &own_address_type))
         return;
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    CubeBleHostSync(own_address_type);
+#endif
     if (!callouts_initialized) {
         ble_npl_callout_init(&retry, nimble_port_get_dflt_eventq(), Scan, nullptr);
         ble_npl_callout_init(&telemetry_timer, nimble_port_get_dflt_eventq(), TelemetryTick,
@@ -475,6 +497,9 @@ void OnSync() {
     Scan(nullptr);
 }
 void OnReset(int reason) {
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    CubeBleHostReset();
+#endif
     ESP_LOGE(kTag, "NimBLE reset %d; all positions released", reason);
     connecting = false;
     if (callouts_initialized) {
@@ -520,16 +545,24 @@ void StartCubeSplitBench() {
     }
     ESP_LOGW(kTag, "Bench input only, USB/BLE HID OFF. Allowlist: left=%d right=%d",
              peers[0].configured, peers[1].configured);
+#if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
     if (!peers[0].configured && !peers[1].configured) {
         ESP_LOGW(kTag,
                  "Configure fixed public/static identity addresses before testing; no automatic "
                  "pairing");
         return;
     }
+#endif
     if (nimble_port_init() != ESP_OK) {
         ESP_LOGE(kTag, "NimBLE init failed");
         return;
     }
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    if (!CubeBleHostInit()) {
+        ESP_LOGE(kTag, "Computer HID/NVS initialization failed; no split input started");
+        return;
+    }
+#endif
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 0;  // ZMK split uses encrypted L2, not a passkey UI.
@@ -539,10 +572,21 @@ void StartCubeSplitBench() {
     ble_hs_cfg.sync_cb = OnSync;
     ble_hs_cfg.reset_cb = OnReset;
     ble_store_config_init();
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    // Never evict a split or another computer bond when the table is full.
+    ble_hs_cfg.store_status_cb = [](ble_store_status_event*, void*) { return BLE_HS_ENOMEM; };
+#endif
     nimble_port_freertos_init(Host);
 }
 
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
+bool CubeSplitIsKeyboard(const uint8_t* address, uint8_t type) {
+    for (const auto& peer : peers)
+        if (peer.configured && peer.address.type == type &&
+            !std::memcmp(address, peer.address.val, 6))
+            return true;
+    return false;
+}
 FightTelemetry CubeSplitFightTelemetry() {
     std::lock_guard<std::mutex> lock(telemetry_mutex);
     return fight_cache;

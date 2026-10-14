@@ -25,3 +25,7 @@ class CubeSplitDiagnosticsTest(unittest.TestCase):
         self.assertTrue(diag.decode_status('CUBE-USB-CANDIDATE/1 15 HID-ON')['hid_enabled'])
         self.assertFalse(diag.decode_status('CUBE-USB-CANDIDATE/1 15 HID-OFF')['hid_enabled'])
         with self.assertRaises(ValueError): diag.validate_identity('C1:23:45:67:89:AB', 2)
+
+    def test_dual_candidate_status(self):
+        self.assertEqual(diag.decode_status('CUBE-DUAL-CANDIDATE/1 15 HID-ON')['variant'], 'DUAL-CANDIDATE')
+        self.assertFalse(diag.decode_status('CUBE-DUAL-CANDIDATE/1 15 HID-OFF')['hid_enabled'])

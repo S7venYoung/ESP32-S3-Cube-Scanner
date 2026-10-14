@@ -1,5 +1,6 @@
 #include <cassert>
 #include <vector>
+#include "host_control.h"
 #include "peer_binding.h"
 #include "report_queue.h"
 #include "split_state.h"
@@ -10,6 +11,43 @@
 using namespace cube_dongle;
 
 int main() {
+    HostRequest host_request;
+    for (int slot = 1; slot <= 5; ++slot) {
+        assert(ParseHostCommand("DONGLE BT " + std::to_string(slot), host_request));
+        assert(host_request.command == HostCommand::Select && host_request.profile == slot - 1);
+    }
+    assert(ParseHostCommand("DONGLE OUTPUT AUTO", host_request) &&
+           host_request.command == HostCommand::Auto);
+    assert(ParseHostCommand("DONGLE OUTPUT USB", host_request) &&
+           host_request.command == HostCommand::Usb);
+    assert(ParseHostCommand("DONGLE OUTPUT BLE", host_request) &&
+           host_request.command == HostCommand::Ble);
+    assert(ParseHostCommand("DONGLE BT CLEAR", host_request) &&
+           host_request.command == HostCommand::Clear);
+    assert(ParseHostCommand("DONGLE BT CLEAR ALL", host_request) &&
+           host_request.command == HostCommand::ClearAll);
+    assert(ParseHostCommand("DONGLE BT PAIR", host_request) &&
+           host_request.command == HostCommand::Pair);
+    assert(ParseHostCommand("DONGLE DISABLE", host_request) &&
+           host_request.command == HostCommand::Disable);
+    for (const auto& invalid :
+         {"DONGLE BT 0", "DONGLE BT 6", "DONGLE BT 01", "DONGLE BT 1x", "DONGLE BT 1 ",
+          "DONGLE OUTPUT", "DONGLE OUTPUT bluetooth", "DONGLE BT CLEAR ALL NOW"})
+        assert(!ParseHostCommand(invalid, host_request));
+    HostBarrier host_barrier;
+    ReportFrame held;
+    held.keyboard[0] = 8;
+    held.keyboard[2] = 4;
+    assert(!host_barrier.Accept(held, true));
+    assert(!host_barrier.Accept({}, false));
+    assert(host_barrier.Accept({}, true));
+    assert(host_barrier.Accept(held, true));
+    host_barrier.Begin();
+    ReportFrame media_held;
+    media_held.media = 1;
+    assert(!host_barrier.Accept(media_held, true));
+    assert(!host_barrier.Accept({}, false));
+    assert(host_barrier.Waiting() && host_barrier.Accept({}, true));
     KeyboardState<61, 3> activity_keyboard(VelvetKeymap());
     TypingActivity activity;
     SplitState::Snapshot typing{};

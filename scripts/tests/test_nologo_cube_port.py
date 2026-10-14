@@ -36,8 +36,17 @@ class NologoCubePortTest(unittest.TestCase):
         self.assertIn('CONFIG_TINYUSB_CDC_COUNT=1', candidate['sdkconfig_append'])
         self.assertIn('CONFIG_TINYUSB_HID_COUNT=1', candidate['sdkconfig_append'])
         for variant in variants:
-            if variant is not candidate:
+            if variant is not candidate and not variant['name'].endswith('-dual-dongle-candidate'):
                 self.assertNotIn('CONFIG_CUBE_USB_DONGLE_OUTPUT=y', variant['sdkconfig_append'])
+
+    def test_dual_output_is_separate_candidate(self):
+        variants = json.loads((BOARD / 'config.json').read_text())['builds']
+        dual = next(v for v in variants if v['name'].endswith('-dual-dongle-candidate'))
+        for flag in ['CONFIG_CUBE_BLE_DONGLE_OUTPUT=y', 'CONFIG_BT_NIMBLE_ROLE_CENTRAL=y', 'CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y', 'CONFIG_BT_NIMBLE_MAX_BONDS=7', 'CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3']:
+            self.assertIn(flag, dual['sdkconfig_append'])
+        for variant in variants:
+            if variant is not dual:
+                self.assertNotIn('CONFIG_CUBE_BLE_DONGLE_OUTPUT=y', variant['sdkconfig_append'])
 
     def test_board_and_power_mapping(self):
         source = (BOARD / 'xingzhi-cube-1.54tft-wifi.cc').read_text()

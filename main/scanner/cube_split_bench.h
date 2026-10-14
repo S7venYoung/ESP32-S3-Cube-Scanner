@@ -11,3 +11,4 @@ uint32_t CubeSplitBenchStatus();
 std::string CubeSplitBenchBind(const std::string& command);
 FightTelemetry CubeSplitFightTelemetry();
 KeyboardStatus CubeSplitKeyboardStatus();
+bool CubeSplitIsKeyboard(const uint8_t* address, uint8_t type);

@@ -79,9 +79,11 @@ bool enabled = true;
 std::atomic<bool> completed{false};
 std::atomic<bool> failed{false};
 std::atomic<uint32_t> link_epoch{0};
+std::atomic<bool> neutral_delivered{false};
 void OnUsbEvent(tinyusb_event_t*, void*) { ++link_epoch; }
 
 void ReleaseLocked() {
+    neutral_delivered = false;
     frames.ReleaseAndInhibit();
     ++revision;
     portENTER_CRITICAL(&cache_mux);
@@ -114,6 +116,8 @@ void Worker(void*) {
             if (ticket != revision)
                 phase = 0;
             else if (++phase == 2) {
+                if (frames.Front() && frames.Front()->Neutral())
+                    neutral_delivered = true;
                 frames.Pop();
                 phase = 0;
             }
@@ -125,6 +129,8 @@ void Worker(void*) {
                 ticket = revision;
                 const bool boot = tud_hid_get_protocol() == HID_PROTOCOL_BOOT;
                 if (phase == 1 && boot) {
+                    if (front->Neutral())
+                        neutral_delivered = true;
                     frames.Pop();
                     phase = 0;
                 } else {
@@ -236,4 +242,10 @@ bool CubeUsbEnabled() {
 void CubeUsbRelease() {
     std::lock_guard<std::mutex> lock(mutex);
     ReleaseLocked();
+}
+bool CubeUsbConnected() { return tud_mounted() && !tud_suspended(); }
+bool CubeUsbNeutralDelivered() { return neutral_delivered.load(); }
+const uint8_t* CubeUsbReportMap(size_t& size) {
+    size = sizeof(report_map);
+    return report_map;
 }

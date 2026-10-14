@@ -10,3 +10,6 @@ void CubeUsbSubmit(const cube_dongle::ReportFrame& frame);
 void CubeUsbEnable(bool enabled);
 bool CubeUsbEnabled();
 void CubeUsbRelease();
+bool CubeUsbConnected();
+bool CubeUsbNeutralDelivered();
+const uint8_t* CubeUsbReportMap(size_t& size);

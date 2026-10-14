@@ -19,7 +19,7 @@ def validate_identity(value, address_type):
 
 
 def decode_status(line):
-    match = re.fullmatch(r'CUBE-(SPLIT-BENCH|USB-CANDIDATE)/1 (\d+) HID-(ON|OFF)', line)
+    match = re.fullmatch(r'CUBE-(SPLIT-BENCH|USB-CANDIDATE|DUAL-CANDIDATE)/1 (\d+) HID-(ON|OFF)', line)
     if not match:
         raise ValueError('不是输入测试固件的诊断响应；不会继续写入配置')
     if match.group(1) == 'SPLIT-BENCH' and match.group(3) != 'OFF':
@@ -77,6 +77,8 @@ def main():
             if exchange(port, 'DONGLE DISABLE', 'CUBE-USB-CANDIDATE ') != 'CUBE-USB-CANDIDATE DISABLED':
                 raise ValueError('无法禁用 HID，停止配置写入')
             print('配置期间已禁用 HID；手动重启后恢复。')
+        if bindings and status['variant'] == 'DUAL-CANDIDATE':
+            raise ValueError('双输出版本请先 DONGLE DISABLE 并确认 DONGLE HOST 切换完成，再单独执行 DONGLE BIND；此脚本不会假定异步禁用已完成')
         for side, address, kind in bindings:
             reply = exchange(port, f'DONGLE BIND {side} {address} {kind}', 'CUBE-SPLIT-BIND ')
             if reply not in ('CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-OFF', 'CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-MODE-UNCHANGED'):

@@ -32,6 +32,14 @@ config CUBE_USB_DONGLE_OUTPUT
         Replaces USB Serial/JTAG sync with TinyUSB CDC. BLE computer output
         and advanced ZMK behaviors are not implemented by this candidate.
 
+config CUBE_BLE_DONGLE_OUTPUT
+    bool "Experimental Cube computer BLE HID + five profiles"
+    depends on CUBE_USB_DONGLE_OUTPUT && BT_NIMBLE_ROLE_PERIPHERAL && BT_NIMBLE_GATT_SERVER
+    default n
+    help
+        Shares NimBLE with the encrypted split client. Adds computer keyboard/media
+        HID over GATT, persistent five-slot host selection and safe USB/BLE routing.
+
 config CUBE_SPLIT_LEFT_ADDRESS_TYPE
     int "Left identity address type (0 public, 1 static random)"
     depends on CUBE_SPLIT_BENCH
