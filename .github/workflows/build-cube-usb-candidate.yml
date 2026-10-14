@@ -1,12 +1,5 @@
 name: Build Cube USB dongle candidate
 on:
-  push:
-    branches: [codex/xingzhi-cube-dongle]
-    paths:
-      - 'main/**'
-      - 'experimental/cube_dongle/**'
-      - 'scripts/build-cube-usb-candidate.sh'
-      - '.github/workflows/build-cube-usb-candidate.yml'
   workflow_dispatch:
 permissions:
   contents: read
