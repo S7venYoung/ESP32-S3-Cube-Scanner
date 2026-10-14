@@ -218,7 +218,7 @@ void UpdateCache() {
 void Send(size_t transport, const wire::Bytes& payload) {
     const auto bytes = wire::Frame(payload);
     const bool sent =
-        transport == 0 ? CubeCdcWritePacket(bytes.data(), bytes.size())
+        transport == 0 ? CubeCdcWritePacket(bytes.data(), bytes.size(), sessions[transport].epoch)
                        : CubeBleStudioWrite(bytes.data(), bytes.size(), sessions[transport].epoch);
     if (!sent)
         ESP_LOGW("CubeStudio", "Response interrupted; reconnect Studio");
@@ -234,8 +234,9 @@ void UnsavedNotification() {
 }
 bool Feed(size_t transport, uint8_t byte, uint32_t epoch) {
     auto& session = sessions[transport];
-    if (!session.connected || (transport && (epoch != session.epoch || !CubeBleStudioReady() ||
-                                             epoch != CubeBleStudioEpoch())))
+    if (!session.connected || epoch != session.epoch ||
+        (transport ? (!CubeBleStudioReady() || epoch != CubeBleStudioEpoch())
+                   : (!CubeUsbAttached() || epoch != CubeUsbEpoch())))
         return transport != 0;
     session.last_byte = esp_timer_get_time();
     return session.framer.Feed(byte, [transport](const wire::Bytes& payload) {
@@ -410,13 +411,13 @@ void CubeStudioPoll() {
         });
     }
     const bool ready[] = {CubeUsbAttached(), CubeBleStudioReady()};
-    const uint32_t epoch = CubeBleStudioEpoch();
+    const uint32_t epochs[] = {CubeUsbEpoch(), CubeBleStudioEpoch()};
     const bool unlock = unlock_request.exchange(false);
     for (size_t i = 0; i < sessions.size(); ++i) {
         auto& session = sessions[i];
-        if (!ready[i] || (i && session.epoch != epoch)) {
+        if (!ready[i] || session.epoch != epochs[i]) {
             session = Session{};
-            session.epoch = i ? epoch : 0;
+            session.epoch = epochs[i];
         }
         if (!ready[i])
             continue;
@@ -436,7 +437,7 @@ void CubeStudioPoll() {
         }
     }
 }
-bool CubeStudioFeed(uint8_t byte) { return Feed(0, byte, 0); }
+bool CubeStudioFeed(uint8_t byte) { return Feed(0, byte, CubeUsbEpoch()); }
 bool CubeStudioFeedBle(uint8_t byte, uint32_t epoch) { return Feed(1, byte, epoch); }
 bool CubeStudioUnlockUsb() {
     if (!CubeUsbAttached() && !CubeBleStudioReady())

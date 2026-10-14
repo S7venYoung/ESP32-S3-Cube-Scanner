@@ -25,3 +25,11 @@ class StudioIntegrationTest(unittest.TestCase):
         split = (ROOT / 'main/scanner/cube_split_bench.cc').read_text()
         publish = split[split.index('void PublishKeyboard()'):split.index('ble_npl_callout retry')]
         self.assertLess(publish.index('CubeStudioRefreshKeymap'), publish.index('keyboard.Apply'))
+
+    def test_usb_session_epoch_guards_response_and_reconnect_lock(self):
+        source = (ROOT / 'main/scanner/cube_studio.cc').read_text()
+        usb = (ROOT / 'main/scanner/cube_usb_dongle.cc').read_text()
+        self.assertIn('CubeUsbEpoch(), CubeBleStudioEpoch()', source)
+        self.assertIn('session.epoch != epochs[i]', source)
+        self.assertIn('CubeCdcWritePacket(bytes.data(), bytes.size(), sessions[transport].epoch)', source)
+        self.assertIn('link_epoch.load() != expected_epoch', usb)

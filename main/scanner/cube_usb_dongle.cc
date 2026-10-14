@@ -251,13 +251,17 @@ void CubeCdcWrite(const char* bytes, size_t size) {
     if (!CubeCdcWritePacket(reinterpret_cast<const uint8_t*>(bytes), size))
         ESP_LOGW(kTag, "CDC reply interrupted");
 }
-bool CubeCdcWritePacket(const uint8_t* bytes, size_t size) {
+uint32_t CubeUsbEpoch() { return link_epoch.load(); }
+bool CubeCdcWritePacket(const uint8_t* bytes, size_t size, uint32_t expected_epoch) {
     if (!bytes || size > 8194)
         return false;
+    if (expected_epoch == UINT32_MAX)
+        expected_epoch = link_epoch.load();
     const int64_t deadline = esp_timer_get_time() + 2000000;
     size_t at = 0;
     while (at < size) {
-        if (!tud_mounted() || esp_timer_get_time() >= deadline)
+        if (!tud_mounted() || link_epoch.load() != expected_epoch ||
+            esp_timer_get_time() >= deadline)
             return false;
         const size_t chunk = std::min(size - at, size_t(64));
         const size_t queued = tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, bytes + at, chunk);
@@ -268,7 +272,8 @@ bool CubeCdcWritePacket(const uint8_t* bytes, size_t size) {
         if (!queued)
             vTaskDelay(pdMS_TO_TICKS(2));
     }
-    return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(200)) == ESP_OK;
+    return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(200)) == ESP_OK &&
+           link_epoch.load() == expected_epoch;
 }
 void CubeUsbSubmit(const cube_dongle::ReportFrame& frame) {
     std::lock_guard<std::mutex> lock(mutex);
