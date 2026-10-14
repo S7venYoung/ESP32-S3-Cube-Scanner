@@ -243,6 +243,21 @@ public:
         display_->RegisterDashboardTools();
 #endif
         GetBacklight()->RestoreBrightness();
+#if CONFIG_CUBE_STUDIO_RPC
+        CubeStudioSetActivityHandler([this](unsigned state) {
+            if (state == 2) {
+                rtc_gpio_set_level(GPIO_NUM_21, 0);
+                rtc_gpio_hold_en(GPIO_NUM_21);
+                esp_lcd_panel_disp_on_off(panel_, false);
+                esp_deep_sleep_start();
+            }
+            GetDisplay()->SetPowerSaveMode(state == 1);
+            if (state == 1)
+                GetBacklight()->SetBrightness(1);
+            else
+                GetBacklight()->RestoreBrightness();
+        });
+#endif
     }
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -277,6 +292,9 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
         if (level != PowerSaveLevel::LOW_POWER) {
             power_save_timer_->WakeUp();
+#if CONFIG_CUBE_STUDIO_RPC
+            CubeStudioActivityWake();
+#endif
         }
         WifiBoard::SetPowerSaveLevel(level);
     }

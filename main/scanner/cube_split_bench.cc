@@ -83,6 +83,9 @@ void PublishKeyboard() {
     CubeStudioRecordPositions(input.Combined());
 #endif
     keyboard.Apply(input.Combined());
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioMacroTriggers(keyboard);
+#endif
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
     const auto positions = input.Combined();

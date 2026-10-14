@@ -47,7 +47,7 @@ private:
     std::array<Snapshot, 2> states_{};
 };
 
-enum class Kind { None, Transparent, Key, MomentaryLayer, Media, HostAction };
+enum class Kind { None, Transparent, Key, MomentaryLayer, Media, HostAction, RuntimeMacro };
 struct Binding {
     Kind kind = Kind::None;
     uint16_t value = 0;  // Keyboard usage, layer, media bits, or explicit host command

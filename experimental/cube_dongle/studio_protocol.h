@@ -186,6 +186,7 @@ private:
 };
 
 constexpr uint32_t kKp = 1, kMo = 2, kTransparent = 3, kNone = 4, kBt = 5;
+constexpr uint32_t kRuntimeMacro = 6;
 inline uint32_t Behavior(const Binding& b) {
     switch (b.kind) {
         case Kind::Key:
@@ -197,6 +198,8 @@ inline uint32_t Behavior(const Binding& b) {
             return kTransparent;
         case Kind::HostAction:
             return kBt;
+        case Kind::RuntimeMacro:
+            return kRuntimeMacro;
         default:
             return kNone;
     }
@@ -208,6 +211,7 @@ inline uint32_t Param1(const Binding& b) {
         case Kind::Media:
             return 0xc0000 | (b.value == 1 ? 0xe9 : b.value == 2 ? 0xea : 0xe2);
         case Kind::MomentaryLayer:
+        case Kind::RuntimeMacro:
             return b.value;
         case Kind::HostAction:
             return b.value < 5 ? 3 : b.value == 5 ? 0 : 4;
@@ -240,6 +244,9 @@ inline bool BindingFromWire(uint64_t encoded_id, uint64_t p1, uint64_t p2, Bindi
         return true;
     } else if (id == kNone && !p1 && !p2) {
         out = {};
+        return true;
+    } else if (id == kRuntimeMacro && p1 < 8 && !p2) {
+        out = {Kind::RuntimeMacro, uint16_t(p1), 0};
         return true;
     } else if (id == kBt) {
         if (p1 == 3 && p2 < 5) {
@@ -325,7 +332,7 @@ struct Model {
                 const uint16_t low = data[at++];
                 const uint16_t value = low | (uint16_t(data[at++]) << 8);
                 const uint8_t mods = data[at++];
-                if (kind > unsigned(Kind::HostAction))
+                if (kind > unsigned(Kind::RuntimeMacro))
                     return false;
                 b = {Kind(kind), value, mods};
                 Binding check;
@@ -486,7 +493,7 @@ public:
         } else if (subsystem->tag == 4) {
             if (op->tag == 1 && op->wire == 0) {
                 Bytes list;
-                for (uint32_t b = 1; b <= 5; ++b)
+                for (uint32_t b = 1; b <= 6; ++b)
                     Number(list, 1, b);
                 Message(reply, 1, list);
             } else if (op->tag == 2 && op->wire == 2) {
@@ -494,7 +501,7 @@ public:
                 if (!detail.valid || !detail.Numbers({1}))
                     return Error(id, 3);
                 auto b = detail.Value(1);
-                if (b < 1 || b > 5)
+                if (b < 1 || b > 6)
                     return Error(id, 2);
                 Message(reply, 2, Details(b));
             } else
@@ -601,7 +608,7 @@ private:
         Bytes out;
         Number(out, 1, id);
         const char* names[] = {"",     "Key Press", "Momentary Layer", "Transparent",
-                               "None", "Bluetooth"};
+                               "None", "Bluetooth", "Runtime Macro"};
         Text(out, 2, names[id]);
         if (id == kKp) {
             Bytes set;
@@ -616,6 +623,13 @@ private:
                 Text(constant, 1, v == 0xe9 ? "Volume Up" : v == 0xea ? "Volume Down" : "Mute");
                 Message(set, 1, constant);
             }
+            Message(out, 3, set);
+        } else if (id == kRuntimeMacro) {
+            Bytes set, slot, range;
+            Number(range, 1, 0);
+            Number(range, 2, 7);
+            Message(slot, 4, range);
+            Message(set, 1, slot);
             Message(out, 3, set);
         } else if (id == kMo) {
             Bytes set, layer;

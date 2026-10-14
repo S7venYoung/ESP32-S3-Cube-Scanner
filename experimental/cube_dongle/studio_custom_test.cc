@@ -1,5 +1,6 @@
 #include <cassert>
 #include "studio_diagnostics.h"
+#include "studio_watchdog.h"
 
 using namespace cube_dongle::studio;
 Bytes Request(uint32_t tag, const Bytes& arguments = {}) {
@@ -15,7 +16,6 @@ int main() {
     Bytes envelope;
     Number(envelope, 1, 91);
     Message(envelope, 100, Request(1));
-    Reader response(rpc.Handle(envelope, [](const Bytes&) { return false; }));
     // Reader stores pointers: hold response bytes throughout nested inspection.
     auto bytes = rpc.Handle(envelope, [](const Bytes&) { return false; });
     Reader outer(bytes);
@@ -48,4 +48,18 @@ int main() {
     auto reset = diagnostics.Handle(Request(7), true, 112);
     assert(Reader(reset).Get(8));
     assert(Reader(diagnostics.Handle(Request(3), false, 112)).Get(1));
+    WatchdogLog log;
+    log.Boot(16);
+    auto record = log.Export();
+    WatchdogLog restored;
+    assert(restored.Load(record));
+    record.back() ^= 1;
+    assert(!restored.Load(record));
+    assert(Reader(log.Handle(Request(1), false, [](const Bytes&) { return false; })).Get(2));
+    Bytes all;
+    Number(all, 2, 1);
+    assert(Reader(log.Handle(Request(3, all), false, [](const Bytes&) { return true; })).Get(1));
+    assert(Reader(log.Handle(Request(3, all), true, [](const Bytes&) { return false; })).Get(1));
+    assert(Reader(log.Handle(Request(3, all), true, [](const Bytes&) { return true; })).Get(4));
+    assert(Reader(log.Handle(Request(4), true, [](const Bytes&) { return true; })).Get(1));
 }

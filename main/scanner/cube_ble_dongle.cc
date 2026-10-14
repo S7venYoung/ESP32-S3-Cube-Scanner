@@ -20,6 +20,7 @@
 #include <mutex>
 #include "../../experimental/cube_dongle/studio_diagnostics.h"
 #include "../../experimental/cube_dongle/studio_transport.h"
+#include "cube_studio.h"
 #endif
 #include "../../experimental/cube_dongle/host_control.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
@@ -625,6 +626,9 @@ bool OldReleased() {
                    : (!CubeUsbAttached() || CubeUsbNeutralDelivered());
 }
 void BeginTransition(HostRequest request) {
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioCancelMacros();
+#endif
     if (request.command == HostCommand::Next)
         request = {HostCommand::Select, static_cast<uint8_t>((selected + 1) % 5)};
     if (request.command == HostCommand::Select && request.profile == selected &&
@@ -806,6 +810,7 @@ void CubeBleHostSync(uint8_t type) {
 }
 void CubeBleHostReset() {
 #if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioCancelMacros();
     studio_subscribed = false;
     StudioReset();
 #endif
@@ -830,6 +835,8 @@ void CubeDualTick() {
 #if CONFIG_CUBE_STUDIO_RPC
     StudioPublish();
     StudioPump();
+    if (!enabled || (routed_ble ? !NotifyReady() : !CubeUsbAttached()))
+        CubeStudioCancelMacros();
 #endif
     if (connection != BLE_HS_CONN_HANDLE_NONE &&
         ((!authorized && esp_timer_get_time() >= security_deadline) ||
@@ -865,11 +872,15 @@ void CubeDualTick() {
             physical_input,
             physical_neutral && (routed_ble ? (!NotifyReady() || neutral_sent)
                                             : (!CubeUsbAttached() || CubeUsbNeutralDelivered())))) {
+        auto output = physical_input;
+#if CONFIG_CUBE_STUDIO_RPC
+        output = CubeStudioMacroOutput(output);
+#endif
         if (routed_ble) {
             if (NotifyReady())
-                SubmitBle(physical_input);
+                SubmitBle(output);
         } else
-            CubeUsbSubmit(physical_input);
+            CubeUsbSubmit(output);
     }
     if (!profiles[selected].bound && esp_timer_get_time() >= pairing_until && ble_gap_adv_active())
         ble_gap_adv_stop();
