@@ -184,8 +184,7 @@ void Advertise() {
     fields.num_uuids16 = 1;
     fields.uuids16_is_complete = 1;
     int rc = ble_gap_adv_set_fields(&fields);
-    char name[24];
-    std::snprintf(name, sizeof(name), "Cube ZMK BLE %u", selected + 1);
+    const char name[] = "Cube Velvet Pro";
     ble_svc_gap_device_name_set(name);
     ble_hs_adv_fields response{};
     response.name = reinterpret_cast<const uint8_t*>(name);
@@ -452,7 +451,7 @@ bool RegisterGatt() {
     services[1].characteristics = device_info;
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_svc_gap_device_name_set("Cube ZMK BLE");
+    ble_svc_gap_device_name_set("Cube Velvet Pro");
     return !ble_gatts_count_cfg(services) && !ble_gatts_add_svcs(services);
 }
 bool ClearSlot(unsigned slot) {

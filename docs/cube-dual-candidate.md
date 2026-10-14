@@ -39,7 +39,7 @@ Exit the companion before opening its CDC port manually. Do not reset the board 
 
 Mutation commands return `CUBE-DUAL-CANDIDATE QUEUED <ticket>`, not a false success acknowledgement. Release physical keys and poll `DONGLE HOST` until DONE matches that ticket and COMMAND-RESULT=0; check the expected PROFILE/OUTPUT too. SWITCHING reports pending work; an immediate old idle status is not completion. Tickets wrap after 65535, so finish one operation before issuing another. Another command may be held in the single bounded mailbox; `ERR HOST-BUSY` means it was not accepted. RESULT -1 is a storage failure, -2 a busy keyboard action, -3 attempting PAIR on a bound slot, -4 report overflow; positive values are NimBLE errors. COMMAND-RESULT is the last command result, separate from later transport errors. Errors do not grant HID authorization. Disable and verify completion before changing split bindings. The older binding diagnostic script deliberately refuses automated dual-output mutation because its synchronous acknowledgement assumptions no longer apply.
 
-The computer appears as `Cube ZMK BLE 1` ... `Cube ZMK BLE 5`, according to the selected slot. Selecting another bound slot disconnects the previous computer after release and advertises for the selected identity. Selecting USB/AUTO does not discard computer bonds.
+The computer always appears as `Cube Velvet Pro`, independent of the selected slot. Bluetooth names do not include a slot number; no display layout changes are made by this rename. Selecting another bound slot disconnects the previous computer after release and advertises for the selected identity. Selecting USB/AUTO does not discard computer bonds.
 
 ## Build and remaining validation
 
