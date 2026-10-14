@@ -1,12 +1,5 @@
 name: Build Cube split input bench
 on:
-  push:
-    branches: [codex/xingzhi-cube-dongle]
-    paths:
-      - 'main/**'
-      - 'scripts/build-cube-dongle-bench.sh'
-      - 'experimental/cube_dongle/**'
-      - '.github/workflows/build-cube-dongle-bench.yml'
   workflow_dispatch:
 permissions:
   contents: read

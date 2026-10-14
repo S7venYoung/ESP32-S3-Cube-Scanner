@@ -1,13 +1,5 @@
 name: Build Cube USB and BLE dongle candidate
 on:
-  push:
-    branches: [codex/xingzhi-cube-dongle]
-    paths:
-      - 'main/**'
-      - 'experimental/cube_dongle/**'
-      - 'scripts/**'
-      - 'docs/cube-dual-candidate.md'
-      - '.github/workflows/build-cube-dual-candidate.yml'
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,7 +1,5 @@
 name: Test experimental Cube dongle core
 on:
-  push:
-    branches: [codex/xingzhi-cube-dongle]
   workflow_dispatch:
 permissions:
   contents: read
