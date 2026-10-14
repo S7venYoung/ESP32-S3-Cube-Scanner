@@ -244,6 +244,7 @@ void CubeUsbRelease() {
     ReleaseLocked();
 }
 bool CubeUsbConnected() { return tud_mounted() && !tud_suspended(); }
+bool CubeUsbAttached() { return tud_mounted(); }
 bool CubeUsbNeutralDelivered() { return neutral_delivered.load(); }
 const uint8_t* CubeUsbReportMap(size_t& size) {
     size = sizeof(report_map);

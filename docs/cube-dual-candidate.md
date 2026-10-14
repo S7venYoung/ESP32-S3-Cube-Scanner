@@ -6,13 +6,21 @@ The existing Fight theme, dojo/fighters/idle animation, left/right typing activi
 
 ## Routing and profiles
 
-Fresh configuration uses AUTO: USB HID when mounted and not suspended, otherwise computer BLE HID. It sends keys to one output, never both computers. An explicit output preference is persisted independently of the five computer profiles. Each profile stores the resolved public/static computer identity; NimBLE persists its security keys/IRKs. The same computer identity cannot be claimed by two slots, and a split-keyboard identity cannot be used as a computer slot.
+Fresh configuration uses AUTO: USB HID while mounted, otherwise computer BLE HID. USB suspend pauses output; it is not permission to bypass release of the old host. A suspended USB host must resume or be unplugged before handoff. It sends keys to one output, never both computers. An explicit output preference is persisted independently of the five computer profiles. Each profile stores the resolved public/static computer identity; NimBLE persists its security keys/IRKs. Authorization/profile storage is deferred until a subsequent host event after identity update and key persistence; both stored Secure Connections keys must have 16-byte key size. The same computer identity cannot be claimed by two slots, and a split-keyboard identity cannot be used as a computer slot.
 
-Selection first queues release-all on the old endpoint, waits for transport transmit completion (not an OS/application acknowledgement) or disconnection, and waits for all physical positions to be released, including layer keys. Held keys are never replayed into the newly selected host. Both transports have bounded ordered 64-frame queues; overflow, protocol changes, encryption/subscription changes and reconnect require neutral input before accepting further keys. A stalled BLE notification is disconnected after three seconds. A computer that does not complete encrypted/bonded security is disconnected after fifteen seconds.
+Selection first queues release-all on the old endpoint, waits for transport transmit completion (not an OS/application acknowledgement) or disconnection, and waits for all physical positions to be released, including layer keys. Held keys are never replayed into the newly selected host. If a BLE host is suspended or unsubscribed and cannot accept release, switching disconnects it after 500 ms and waits for the disconnect event. Both transports have bounded ordered 64-frame queues; overflow, protocol changes, encryption/subscription changes and reconnect require neutral input before accepting further keys. A stalled BLE notification is disconnected after three seconds. A computer that does not complete encrypted/bonded security is disconnected after fifteen seconds.
 
 Keyboard SYS-layer BT_SEL 0..4 selects computer slot 1..5 and explicitly prefers BLE output. BT_CLR clears the selected **computer** slot; BT_CLR_ALL clears only these five computer slots. These commands do not clear the left/right split bonds, `cube_split` bindings, Wi-Fi or Codex pairing token. The bond table permits seven peers (five computers plus two halves); a full table fails rather than silently evicting an existing keyboard or computer.
 
 Existing bound profiles may reconnect. An empty slot does not advertise after boot until explicitly selected or opened for pairing. Selecting an empty profile or clearing a slot opens a two-minute Just Works pairing window. This is encrypted bonding, **not** passkey/MITM authentication; only open the window in a trusted environment. A wrong resolved identity is rejected. Host-based privacy is enabled for bonded computer RPA resolution; interoperability remains a hardware test.
+
+## Voice, board buttons and existing keyboard shortcuts
+- Say “你好小智，切换下一个蓝牙” or “你好小智，切换到蓝牙二” (slots 一/二/三/四/五 or 1..5; optional 号). Local STT matching is exact and never clears bonds by voice.
+- Long-press **Volume Up** selects the next computer slot, wrapping 5 to 1. Its short press remains volume increase.
+- Long-press **Volume Down** still cycles dashboard themes. Its short press remains volume decrease.
+- Existing keyboard SYS-layer BT_SEL 0..4, BT_CLR and BT_CLR_ALL bindings are unchanged. No new keyboard hotkeys or additional keyboard firmware changes are required.
+- MCP also offers fixed-profile selection (1..5) and a read-only Bluetooth status tool. After a matched local voice command, cloud set-profile mutations are suppressed for the same utterance (up to 30 seconds); the next user STT message resets this guard. This prevents the local “Next” command plus a cloud-selected profile from advancing twice.
+- The display says “queued” while a request waits for physical keys to be released, then reports selected profile or failure. “Connected” is shown only after identity, stored security keys, encryption and the keyboard notification subscription are validated; this is not proof of OS key reception.
 
 ## USB CDC commands (115200, newline terminated)
 
@@ -20,6 +28,7 @@ Exit the companion before opening its CDC port manually. Do not reset the board 
 
 - `DONGLE`: `CUBE-DUAL-CANDIDATE/1 <split-status> HID-ON|OFF`.
 - `DONGLE HOST`: current one-based PROFILE, active OUTPUT, BLE-READY, SWITCHING and RESULT.
+- `DONGLE BT NEXT`: select the next slot (5 wraps to 1), same as Volume Up and the local voice command.
 - `DONGLE BT 1` through `DONGLE BT 5`: select/persist a slot and prefer BLE. Empty slots open pairing.
 - `DONGLE BT PAIR`: reopen the selected empty slot for two minutes. A bound slot requires explicit CLEAR first.
 - `DONGLE BT CLEAR`: clear only the selected computer's bond/profile and open pairing.

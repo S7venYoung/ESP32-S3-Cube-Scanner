@@ -13,6 +13,10 @@ class DualDongleIntegrationTest(unittest.TestCase):
         self.assertIn('ble_store_util_delete_peer(&profiles[slot].identity)', ble)
         self.assertIn('desc.sec_state.encrypted', ble)
         self.assertIn('desc.sec_state.bonded', ble)
+        self.assertIn('AuthorizeAfterPersistence', ble)
+        self.assertIn('ble_store_read_our_sec', ble)
+        self.assertIn('ble_store_read_peer_sec', ble)
+        self.assertIn('host_epoch', ble)
         self.assertIn('physical_neutral', ble)
         self.assertIn('flight_revision != revision', ble)
 
@@ -30,3 +34,17 @@ class DualDongleIntegrationTest(unittest.TestCase):
         self.assertIn('ERR HOST-BUSY', ble)
         self.assertIn('SWITCHING=', ble)
         self.assertIn('RESULT=', ble)
+
+    def test_voice_button_and_keyboard_switching(self):
+        board = (ROOT / 'main/boards/nologo/xingzhi-cube-1.54tft-wifi/xingzhi-cube-1.54tft-wifi.cc').read_text()
+        start = board.index('volume_up_button_.OnLongPress')
+        end = board.index('volume_down_button_.OnClick', start)
+        self.assertIn('DONGLE BT NEXT', board[start:end])
+        self.assertIn('NextDashboardTheme()', board)
+        display = (ROOT / 'main/scanner/codex_scanner_display.cc').read_text()
+        self.assertIn('CubeBluetoothVoiceCommand', display)
+        self.assertIn('self.keyboard.set_bluetooth_profile', display)
+        self.assertIn('CubeDualNotice', display)
+        ble = (ROOT / 'main/scanner/cube_ble_dongle.cc').read_text()
+        self.assertIn('actions & (1u << i)', ble)
+        self.assertIn('HostCommand::Next', ble)

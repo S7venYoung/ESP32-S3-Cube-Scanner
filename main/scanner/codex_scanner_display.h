@@ -3,6 +3,7 @@
 #include "display/lcd_display.h"
 #include "scanner_device.h"
 
+#include <atomic>
 #include <vector>
 
 class CodexScannerDisplay : public SpiLcdDisplay {
@@ -56,6 +57,9 @@ private:
     lv_obj_t* assistant_orb_ = nullptr;
     lv_obj_t* assistant_overlay_text_ = nullptr;
     int shown_assistant_state_ = -1;
+    uint32_t shown_bluetooth_notice_ = 0;
+    std::atomic<bool> local_bluetooth_voice_handled_{false};
+    std::atomic<uint32_t> local_bluetooth_voice_ms_{0};
     lv_obj_t* scan_dot_ = nullptr;
     lv_obj_t* scan_status_ = nullptr;
     lv_obj_t* filter_label_ = nullptr;

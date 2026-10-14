@@ -1,5 +1,6 @@
 #include <cassert>
 #include <vector>
+#include "../../main/scanner/bluetooth_voice.h"
 #include "host_control.h"
 #include "peer_binding.h"
 #include "report_queue.h"
@@ -11,7 +12,16 @@
 using namespace cube_dongle;
 
 int main() {
+    assert(CubeBluetoothVoiceCommand("你好小智，切换下一个蓝牙。") == "DONGLE BT NEXT");
+    assert(CubeBluetoothVoiceCommand("小智请切换到蓝牙二号") == "DONGLE BT 2");
+    assert(CubeBluetoothVoiceCommand("连接蓝牙5") == "DONGLE BT 5");
+    assert(CubeBluetoothVoiceCommand("切换蓝牙配置三") == "DONGLE BT 3");
+    for (const auto* invalid : {"不要切换蓝牙二", "蓝牙二", "切换到蓝牙6", "切换到蓝牙二然后清空",
+                                "清空蓝牙配对", "讨论一下切换蓝牙二"})
+        assert(CubeBluetoothVoiceCommand(invalid).empty());
     HostRequest host_request;
+    assert(ParseHostCommand("DONGLE BT NEXT", host_request) &&
+           host_request.command == HostCommand::Next);
     for (int slot = 1; slot <= 5; ++slot) {
         assert(ParseHostCommand("DONGLE BT " + std::to_string(slot), host_request));
         assert(host_request.command == HostCommand::Select && host_request.profile == slot - 1);

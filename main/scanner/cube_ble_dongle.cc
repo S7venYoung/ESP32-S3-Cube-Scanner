@@ -34,6 +34,12 @@ Output preference = Output::Auto;
 bool routed_ble = false, enabled = true, configured = false, synced = false;
 bool authorized = false, suspended = false, keyboard_sub = false, media_sub = false,
      boot_sub = false;
+bool security_pending = false;
+uintptr_t host_epoch = 1;
+int64_t advertisement_next = 0, transition_started = 0;
+std::atomic<uint32_t> ui_notice{0};
+uint32_t notice_sequence = 0;
+void Notice(unsigned kind) { ui_notice = (++notice_sequence << 8) | (selected << 3) | kind; }
 uint8_t own_type = 0, protocol = 1, leds = 0;
 uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
 uint16_t keyboard_handle, media_handle, boot_handle;
@@ -116,12 +122,59 @@ bool ValidIdentity(const ble_addr_t& address) {
     return cube_dongle::ParseIdentity(text, address.type & 1, parsed);
 }
 int Gap(ble_gap_event*, void*);
+void AuthorizeAfterPersistence() {
+    security_pending = false;
+    ble_gap_conn_desc desc{};
+    bool valid = !ble_gap_conn_find(connection, &desc) && desc.sec_state.encrypted &&
+                 desc.sec_state.bonded && ValidIdentity(desc.peer_id_addr) &&
+                 !CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1);
+    ble_store_key_sec key{};
+    ble_store_value_sec our{}, peer{};
+    key.peer_addr = desc.peer_id_addr;
+    key.peer_addr.type &= 1;
+    // ENC_CHANGE precedes identity update and key persistence on fresh pairing.
+    // Authorize only from a subsequent host event after both SC keys are stored.
+    valid = valid && !ble_store_read_our_sec(&key, &our) && !ble_store_read_peer_sec(&key, &peer) &&
+            our.ltk_present && peer.ltk_present && our.sc && peer.sc && our.key_size == 16 &&
+            peer.key_size == 16;
+    for (unsigned i = 0; i < 5; ++i)
+        if (i != selected && profiles[i].bound && Same(profiles[i].identity, desc.peer_id_addr))
+            valid = false;
+    if (valid && profiles[selected].bound)
+        valid = Same(profiles[selected].identity, desc.peer_id_addr);
+    else if (valid) {
+        valid = esp_timer_get_time() < pairing_until && SaveProfile(selected, &desc.peer_id_addr);
+        if (valid) {
+            profiles[selected].bound = true;
+            profiles[selected].identity = desc.peer_id_addr;
+            profiles[selected].identity.type &= 1;
+            pairing_until = 0;
+        } else
+            last_result = -1;
+    }
+    authorized = valid;
+    ReleaseBle();
+    if (routed_ble)
+        barrier.Begin();
+    if (valid)
+        Notice(NotifyReady() ? 2 : 1);
+    else {
+        if (last_result.load() >= 0)
+            last_result = -5;
+        Notice(3);
+        ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+    }
+}
 void Advertise() {
     if (!synced || !configured || connection != BLE_HS_CONN_HANDLE_NONE || transition ||
         (!profiles[selected].bound && esp_timer_get_time() >= pairing_until))
         return;
     if (ble_gap_adv_active())
         return;
+    const auto now = esp_timer_get_time();
+    if (now < advertisement_next)
+        return;
+    advertisement_next = now + 250000;
     static const ble_uuid16_t hid_uuid = BLE_UUID16_INIT(0x1812);
     ble_hs_adv_fields fields{};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
@@ -144,7 +197,8 @@ void Advertise() {
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
     if (!rc)
-        rc = ble_gap_adv_start(own_type, nullptr, BLE_HS_FOREVER, &params, Gap, nullptr);
+        rc = ble_gap_adv_start(own_type, nullptr, BLE_HS_FOREVER, &params, Gap,
+                               reinterpret_cast<void*>(++host_epoch));
     if (rc)
         last_result = rc;
 }
@@ -178,7 +232,9 @@ void Pump() {
         ReleaseBle();
     }
 }
-int Gap(ble_gap_event* event, void*) {
+int Gap(ble_gap_event* event, void* arg) {
+    if (reinterpret_cast<uintptr_t>(arg) != host_epoch)
+        return 0;
     if (event->type == BLE_GAP_EVENT_CONNECT) {
         if (event->connect.status) {
             Advertise();
@@ -186,6 +242,7 @@ int Gap(ble_gap_event* event, void*) {
         }
         connection = event->connect.conn_handle;
         authorized = false;
+        security_pending = false;
         protocol = 1;
         suspended = false;
         keyboard_sub = media_sub = boot_sub = false;
@@ -205,6 +262,7 @@ int Gap(ble_gap_event* event, void*) {
                connection == event->disconnect.conn.conn_handle) {
         connection = BLE_HS_CONN_HANDLE_NONE;
         authorized = false;
+        security_pending = false;
         keyboard_sub = media_sub = boot_sub = false;
         inflight = false;
         phase = 0;
@@ -214,31 +272,12 @@ int Gap(ble_gap_event* event, void*) {
         Advertise();
     } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
                connection == event->enc_change.conn_handle) {
-        ble_gap_conn_desc desc{};
-        bool valid = !event->enc_change.status && !ble_gap_conn_find(connection, &desc) &&
-                     desc.sec_state.encrypted && desc.sec_state.bonded &&
-                     ValidIdentity(desc.peer_id_addr) &&
-                     !CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1);
-        for (unsigned i = 0; i < 5; ++i)
-            if (i != selected && profiles[i].bound && Same(profiles[i].identity, desc.peer_id_addr))
-                valid = false;
-        if (valid && profiles[selected].bound)
-            valid = Same(profiles[selected].identity, desc.peer_id_addr);
-        else if (valid) {
-            valid =
-                esp_timer_get_time() < pairing_until && SaveProfile(selected, &desc.peer_id_addr);
-            if (valid) {
-                profiles[selected].bound = true;
-                profiles[selected].identity = desc.peer_id_addr;
-                pairing_until = 0;
-            } else
-                last_result = -1;
-        }
-        authorized = valid;
+        authorized = false;
+        security_pending = !event->enc_change.status;
         ReleaseBle();
         if (routed_ble)
             barrier.Begin();
-        if (!valid)
+        if (event->enc_change.status)
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     } else if (event->type == BLE_GAP_EVENT_SUBSCRIBE &&
                connection == event->subscribe.conn_handle) {
@@ -251,6 +290,8 @@ int Gap(ble_gap_event* event, void*) {
         ReleaseBle();
         if (routed_ble)
             barrier.Begin();
+        if (authorized)
+            Notice(NotifyReady() ? 2 : 1);
     } else if (event->type == BLE_GAP_EVENT_NOTIFY_TX &&
                connection == event->notify_tx.conn_handle && inflight &&
                flight_handle == event->notify_tx.attr_handle && !event->notify_tx.indication) {
@@ -288,6 +329,8 @@ enum Field : uintptr_t {
     RefOutput
 };
 int Access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void* arg) {
+    if (security_pending && conn == connection)
+        AuthorizeAfterPersistence();
     const auto field = static_cast<Field>(reinterpret_cast<uintptr_t>(arg));
     const bool write = ctx->op == BLE_GATT_ACCESS_OP_WRITE_CHR;
     if (write) {
@@ -430,13 +473,25 @@ bool ClearSlot(unsigned slot) {
     return true;
 }
 bool WantBle() {
-    return preference == Output::Ble || (preference == Output::Auto && !CubeUsbConnected());
+    return preference == Output::Ble || (preference == Output::Auto && !CubeUsbAttached());
 }
 bool OldReleased() {
-    return old_ble ? (!NotifyReady() || neutral_sent)
-                   : (!CubeUsbConnected() || CubeUsbNeutralDelivered());
+    return old_ble ? (connection == BLE_HS_CONN_HANDLE_NONE || neutral_sent)
+                   : (!CubeUsbAttached() || CubeUsbNeutralDelivered());
 }
 void BeginTransition(HostRequest request) {
+    if (request.command == HostCommand::Next)
+        request = {HostCommand::Select, static_cast<uint8_t>((selected + 1) % 5)};
+    if (request.command == HostCommand::Select && request.profile == selected &&
+        preference == Output::Ble && routed_ble && profiles[selected].bound) {
+        last_result = 0;
+        command_result = 0;
+        if (pending_ticket)
+            done_ticket = pending_ticket;
+        Notice(NotifyReady() ? 2 : 1);
+        return;
+    }
+    transition_started = esp_timer_get_time();
     pending = request;
     transition = true;
     old_ble = routed_ble;
@@ -450,6 +505,7 @@ void ApplyPending() {
     pending = {};
     if (request.command == HostCommand::Pair && profiles[selected].bound) {
         last_result = -3;
+        Notice(3);
         command_result = -3;
         if (pending_ticket)
             done_ticket = pending_ticket;
@@ -500,6 +556,18 @@ void ApplyPending() {
         last_result = -1;
     routed_ble = WantBle();
     if (pending_ticket) {
+        if (!okay)
+            Notice(3);
+        else if (request.command == HostCommand::Usb)
+            Notice(4);
+        else if (request.command == HostCommand::Auto)
+            Notice(5);
+        else if (request.command == HostCommand::Disable)
+            Notice(6);
+        else if (request.command == HostCommand::Enable)
+            Notice(7);
+        else
+            Notice(routed_ble && NotifyReady() ? 2 : 1);
         command_result = last_result.load();
         done_ticket = pending_ticket;
     }
@@ -583,6 +651,8 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+    ++host_epoch;
+    security_pending = false;
     synced = false;
     if (timer_initialized)
         ble_npl_callout_stop(&output_timer);
@@ -597,6 +667,8 @@ void CubeBleHostReset() {
 void CubeDualTick() {
     if (!synced || !configured)
         return;
+    if (security_pending && connection != BLE_HS_CONN_HANDLE_NONE)
+        AuthorizeAfterPersistence();
     if (connection != BLE_HS_CONN_HANDLE_NONE &&
         ((!authorized && esp_timer_get_time() >= security_deadline) ||
          (inflight && esp_timer_get_time() - inflight_since > 3000000)))
@@ -613,6 +685,9 @@ void CubeDualTick() {
         }
     }
     Pump();
+    if (transition && old_ble && !NotifyReady() && connection != BLE_HS_CONN_HANDLE_NONE &&
+        esp_timer_get_time() - transition_started >= 500000)
+        ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     if (transition && OldReleased() && physical_neutral) {
         // Keep the request until the disconnect callback has completed.
         if ((pending.command == HostCommand::Select || pending.command == HostCommand::Clear ||
@@ -623,10 +698,10 @@ void CubeDualTick() {
             ApplyPending();
     }
     if (!transition && enabled &&
-        barrier.Accept(physical_input,
-                       physical_neutral &&
-                           (routed_ble ? (!NotifyReady() || neutral_sent)
-                                       : (!CubeUsbConnected() || CubeUsbNeutralDelivered())))) {
+        barrier.Accept(
+            physical_input,
+            physical_neutral && (routed_ble ? (!NotifyReady() || neutral_sent)
+                                            : (!CubeUsbAttached() || CubeUsbNeutralDelivered())))) {
         if (routed_ble) {
             if (NotifyReady())
                 SubmitBle(physical_input);
@@ -676,6 +751,7 @@ std::string CubeDualCommand(const std::string& line) {
         return "ERR HOST-BUSY";
     return "CUBE-DUAL-CANDIDATE QUEUED " + std::to_string(ticket);
 }
+uint32_t CubeDualNotice() { return ui_notice.load(); }
 bool CubeDualEnabled() { return public_status.load() & 1; }
 bool CubeDualUsesBle() { return public_status.load() & 2; }
 bool CubeDualBleReady() { return public_status.load() & 4; }

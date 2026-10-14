@@ -13,7 +13,8 @@ enum class HostCommand : uint8_t {
     Usb,
     Ble,
     Enable,
-    Disable
+    Disable,
+    Next
 };
 struct HostRequest {
     HostCommand command = HostCommand::None;
@@ -24,6 +25,8 @@ inline bool ParseHostCommand(const std::string& line, HostRequest& out) {
     if (line.size() == 11 && line.compare(0, 10, "DONGLE BT ") == 0 && line[10] >= '1' &&
         line[10] <= '5')
         request = {HostCommand::Select, static_cast<uint8_t>(line[10] - '1')};
+    else if (line == "DONGLE BT NEXT")
+        request.command = HostCommand::Next;
     else if (line == "DONGLE BT CLEAR")
         request.command = HostCommand::Clear;
     else if (line == "DONGLE BT CLEAR ALL")

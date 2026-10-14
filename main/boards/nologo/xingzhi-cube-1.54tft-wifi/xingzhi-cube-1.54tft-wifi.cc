@@ -1,25 +1,28 @@
-#include "wifi_board.h"
-#include "codecs/no_audio_codec.h"
-#include "display/lcd_display.h"
-#include "system_reset.h"
 #include "application.h"
-#include "button.h"
-#include "config.h"
-#include "power_save_timer.h"
-#include "led/single_led.h"
 #include "assets/lang_config.h"
+#include "button.h"
+#include "codecs/no_audio_codec.h"
+#include "config.h"
+#include "display/lcd_display.h"
+#include "led/single_led.h"
 #include "power_manager.h"
+#include "power_save_timer.h"
+#include "system_reset.h"
+#include "wifi_board.h"
 #if CONFIG_ZMK_SCANNER_MODE
 #include "scanner/codex_scanner_display.h"
 #include "scanner/zmk_scanner.h"
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+#include "scanner/cube_ble_dongle.h"
+#endif
 void StartCodexSync();
 using BoardDisplay = CodexScannerDisplay;
 #else
 using BoardDisplay = SpiLcdDisplay;
 #endif
 
-#include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_log.h>
 
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -71,7 +74,7 @@ private:
             rtc_gpio_set_level(GPIO_NUM_21, 0);
             // 启用保持功能，确保睡眠期间电平不变
             rtc_gpio_hold_en(GPIO_NUM_21);
-            esp_lcd_panel_disp_on_off(panel_, false); //关闭显示
+            esp_lcd_panel_disp_on_off(panel_, false);  // 关闭显示
             esp_deep_sleep_start();
         });
         power_save_timer_->SetEnabled(true);
@@ -96,12 +99,12 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
-            app.Schedule([](){Application::GetInstance().ToggleChatState();});
+            app.Schedule([]() { Application::GetInstance().ToggleChatState(); });
         });
 
-        boot_button_.OnLongPress([this](){
+        boot_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
-            Application::GetInstance().Schedule([this](){
+            Application::GetInstance().Schedule([this]() {
                 Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
                 EnterWifiConfigMode();
             });
@@ -120,7 +123,13 @@ private:
 
         volume_up_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
-#if !CONFIG_ZMK_SCANNER_MODE
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+            Application::GetInstance().Schedule([this]() {
+                const auto reply = CubeDualCommand("DONGLE BT NEXT");
+                display_->ShowNotification(
+                    reply.rfind("ERR", 0) == 0 ? "蓝牙切换请求失败" : "蓝牙切换已排队，请松开键盘");
+            });
+#elif !CONFIG_ZMK_SCANNER_MODE
             GetAudioCodec()->SetOutputVolume(100);
             GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
 #endif
@@ -140,7 +149,7 @@ private:
         volume_down_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
 #if CONFIG_ZMK_SCANNER_MODE
-            Application::GetInstance().Schedule([this](){display_->NextDashboardTheme();});
+            Application::GetInstance().Schedule([this]() { display_->NextDashboardTheme(); });
 #else
             GetAudioCodec()->SetOutputVolume(0);
             GetDisplay()->ShowNotification(Lang::Strings::MUTED);
@@ -172,8 +181,9 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
 
-        display_ = new BoardDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        display_ =
+            new BoardDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X,
+                             DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
 public:
@@ -186,21 +196,26 @@ public:
         WifiBoard::StartNetwork();
     }
     void SetNetworkEventCallback(NetworkEventCallback callback) override {
-        WifiBoard::SetNetworkEventCallback([callback](NetworkEvent event,const std::string& data){
-            if(callback)callback(event,data);
+        WifiBoard::SetNetworkEventCallback([callback](NetworkEvent event, const std::string& data) {
+            if (callback)
+                callback(event, data);
 #if !CONFIG_CUBE_SPLIT_BENCH
-            if(event==NetworkEvent::Connected)Application::GetInstance().Schedule([](){
-                static bool started=false;
-                if(!started){started=true;StartZmkScanner();}
-            });
+            if (event == NetworkEvent::Connected)
+                Application::GetInstance().Schedule([]() {
+                    static bool started = false;
+                    if (!started) {
+                        started = true;
+                        StartZmkScanner();
+                    }
+                });
 #endif
         });
     }
 #endif
-    XINGZHI_CUBE_1_54TFT_WIFI() :
-        boot_button_(BOOT_BUTTON_GPIO),
-        volume_up_button_(VOLUME_UP_BUTTON_GPIO),
-        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
+    XINGZHI_CUBE_1_54TFT_WIFI()
+        : boot_button_(BOOT_BUTTON_GPIO),
+          volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+          volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
         InitializePowerSaveTimer();
         InitializeSpi();
         InitializeButtons();
@@ -214,21 +229,22 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
         static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
+                                               AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK,
+                                               AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK,
+                                               AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
-        return display_;
-    }
-    
+    virtual Display* GetDisplay() override { return display_; }
+
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        if(!power_manager_->HasBatteryLevel())return false;
+        if (!power_manager_->HasBatteryLevel())
+            return false;
         static bool last_discharging = false;
         charging = power_manager_->IsCharging();
         discharging = power_manager_->IsDischarging();

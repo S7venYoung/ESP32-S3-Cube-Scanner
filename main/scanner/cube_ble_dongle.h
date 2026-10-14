@@ -11,6 +11,7 @@ void CubeDualTick();
 void CubeDualSubmit(const cube_dongle::ReportFrame& frame, uint16_t actions);
 void CubeDualSetNeutral(bool neutral);
 std::string CubeDualCommand(const std::string& line);
+uint32_t CubeDualNotice();
 bool CubeDualEnabled();
 bool CubeDualUsesBle();
 bool CubeDualBleReady();
