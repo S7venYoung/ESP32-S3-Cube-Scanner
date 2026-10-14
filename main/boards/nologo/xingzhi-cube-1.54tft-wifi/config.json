@@ -137,6 +137,7 @@
                 "CONFIG_CUBE_SPLIT_BENCH=y",
                 "CONFIG_CUBE_USB_DONGLE_OUTPUT=y",
                 "CONFIG_CUBE_BLE_DONGLE_OUTPUT=y",
+                "CONFIG_CUBE_SPLIT_AUTO_BIND=y",
                 "CONFIG_TINYUSB_CDC_ENABLED=y",
                 "CONFIG_TINYUSB_CDC_COUNT=1",
                 "CONFIG_TINYUSB_HID_COUNT=1",

@@ -18,6 +18,15 @@ config CUBE_SPLIT_BENCH
         Replaces advertisement-only scanning with an allowlisted split GATT client.
         Does not output USB or BLE keyboard input. Use only for bench validation.
 
+config CUBE_SPLIT_AUTO_BIND
+    bool "Automatically bind Cube-marked left/right peripherals"
+    depends on CUBE_SPLIT_BENCH
+    default n
+    help
+        Learn missing identities only from Cube-specific advertisements, then
+        verify the encrypted side identity and initial matrix before saving.
+        Existing manual bindings are never replaced.
+
 config CUBE_SPLIT_LEFT_ADDRESS
     string "Left keyboard public/static BLE identity (AA:BB:CC:DD:EE:FF)"
     depends on CUBE_SPLIT_BENCH

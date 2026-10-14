@@ -735,6 +735,11 @@ void CubeDualSubmit(const ReportFrame& frame, uint16_t actions) {
     CubeDualTick();
 }
 void CubeDualSetNeutral(bool value) { physical_neutral = value; }
+void CubeDualRequireNeutral() {
+    barrier.Begin();
+    CubeUsbRelease();
+    ReleaseBle();
+}
 std::string CubeDualCommand(const std::string& line) {
     if (line == "DONGLE HOST")
         return CubeDualStatus();

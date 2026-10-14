@@ -10,6 +10,7 @@ void CubeBleHostReset();
 void CubeDualTick();
 void CubeDualSubmit(const cube_dongle::ReportFrame& frame, uint16_t actions);
 void CubeDualSetNeutral(bool neutral);
+void CubeDualRequireNeutral();
 std::string CubeDualCommand(const std::string& line);
 uint32_t CubeDualNotice();
 bool CubeDualEnabled();

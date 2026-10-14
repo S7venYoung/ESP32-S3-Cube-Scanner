@@ -46,4 +46,5 @@ jobs:
             build/sdkconfig
             build/SHA256SUMS
             build/DUAL-CANDIDATE-NOT-FINAL.md
+            build/AUTO-BINDING.md
           if-no-files-found: error

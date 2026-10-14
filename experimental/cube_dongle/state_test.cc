@@ -1,6 +1,7 @@
 #include <cassert>
 #include <vector>
 #include "../../main/scanner/bluetooth_voice.h"
+#include "auto_binding.h"
 #include "host_control.h"
 #include "peer_binding.h"
 #include "report_queue.h"
@@ -12,6 +13,40 @@
 using namespace cube_dongle;
 
 int main() {
+    {
+        std::vector<uint8_t> advert{19, 0x21};
+        advert.insert(advert.end(), kPairSet.begin(), kPairSet.end());
+        advert.push_back(1);
+        advert.push_back(0);
+        assert(AutoSide(advert.data(), advert.size()) == 0);
+        advert.back() = 1;
+        assert(AutoSide(advert.data(), advert.size()) == 1);
+        for (size_t n = 0; n < advert.size(); ++n)
+            assert(AutoSide(advert.data(), n) == -1);
+        advert.back() = 2;
+        assert(AutoSide(advert.data(), advert.size()) == -1);
+        advert.back() = 0;
+        auto duplicate = advert;
+        duplicate.insert(duplicate.end(), advert.begin(), advert.end());
+        assert(AutoSide(duplicate.data(), duplicate.size()) == -1);
+        advert[2] ^= 1;
+        assert(AutoSide(advert.data(), advert.size()) == -1);
+        std::array<uint8_t, 18> identity{};
+        identity[0] = 1;
+        identity[1] = 1;
+        std::copy(kPairSet.begin(), kPairSet.end(), identity.begin() + 2);
+        assert(AutoIdentity(identity.data(), 18, 1));
+        assert(!AutoIdentity(identity.data(), 18, 0));
+        assert(!AutoIdentity(identity.data(), 17, 1));
+        uint8_t address[6] = {1, 2, 3, 4, 5, 0xc0};
+        AutoCandidate candidate;
+        candidate.Observe(address, 1);
+        candidate.Observe(address, 1);
+        assert(candidate.seen && !candidate.ambiguous);
+        ++address[0];
+        candidate.Observe(address, 1);
+        assert(candidate.ambiguous);
+    }
     assert(CubeBluetoothVoiceCommand("你好小智，切换下一个蓝牙。") == "DONGLE BT NEXT");
     assert(CubeBluetoothVoiceCommand("小智请切换到蓝牙二号") == "DONGLE BT 2");
     assert(CubeBluetoothVoiceCommand("连接蓝牙5") == "DONGLE BT 5");

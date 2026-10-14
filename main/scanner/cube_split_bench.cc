@@ -7,6 +7,7 @@
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT
 #include "cube_usb_dongle.h"
 #endif
+#include "../../experimental/cube_dongle/auto_binding.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "../../experimental/cube_dongle/velvet_positions.h"
 
@@ -40,6 +41,7 @@ enum class Phase {
     Idle,
     Connecting,
     Security,
+    Identity,
     Service,
     Characteristic,
     Ccc,
@@ -50,6 +52,9 @@ enum class Phase {
 struct Peer {
     ble_addr_t address{};
     bool configured = false;
+    bool auto_allowed = false, learning = false, identity_seen = false, identity_verified = false;
+    bool auto_retry = false;
+    cube_dongle::SplitState::Snapshot pending_positions{};
     uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
     uintptr_t generation = 1;
     Phase phase = Phase::Idle;
@@ -63,6 +68,10 @@ struct Peer {
     bool battery_pending = false;
 };
 Peer peers[2];
+cube_dongle::AutoCandidate candidates[2];
+std::mutex binding_mutex;
+const ble_uuid128_t kIdentity = BLE_UUID128_INIT(0x43, 0x56, 0x50, 0x31, 0x6f, 0x37, 0x4d, 0x91,
+                                                 0xa6, 0x2e, 0x88, 0x05, 0xd4, 0x73, 0x9b, 0xc1);
 cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
 cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 void PublishKeyboard() {
@@ -175,6 +184,7 @@ void Fail(Peer& peer, const char* reason) {
     if (rc == BLE_HS_ENOTCONN) {
         peer.connection = BLE_HS_CONN_HANDLE_NONE;
         peer.phase = Phase::Idle;
+        peer.learning = false;
         ++peer.generation;
         peer.retry_after = esp_timer_get_time() + 5000000;
         Retry();
@@ -189,8 +199,17 @@ void Timeout(ble_npl_event* event) {
 bool Snapshot(Peer& peer, os_mbuf* mbuf) {
     uint8_t bytes[16];
     if (!mbuf || OS_MBUF_PKTLEN(mbuf) != sizeof(bytes) ||
-        os_mbuf_copydata(mbuf, 0, sizeof(bytes), bytes) ||
-        !input.Apply(Side(peer), bytes, sizeof(bytes), Encrypted(peer)))
+        os_mbuf_copydata(mbuf, 0, sizeof(bytes), bytes) || !Encrypted(peer))
+        return false;
+    const auto owners = cube_dongle::VelvetOwnership();
+    for (size_t i = 0; i < sizeof(bytes); ++i)
+        if (bytes[i] & ~owners[Side(peer)][i])
+            return false;
+    if (peer.learning && !peer.configured) {
+        std::memcpy(peer.pending_positions.data(), bytes, sizeof(bytes));
+        return true;
+    }
+    if (!input.Apply(Side(peer), bytes, sizeof(bytes), true))
         return false;
     const auto state = input.Combined();
     PublishKeyboard();
@@ -237,6 +256,45 @@ void TelemetryTick(ble_npl_event*) {
     PublishStatus();
     ble_npl_callout_reset(&telemetry_timer, ble_npl_time_ms_to_ticks32(100));
 }
+bool SaveAutoBinding(Peer& peer) {
+    std::lock_guard<std::mutex> lock(binding_mutex);
+    if (!peer.identity_verified || !Encrypted(peer))
+        return false;
+    ble_store_key_sec key{};
+    key.peer_addr = peer.address;
+    ble_store_value_sec ours{}, theirs{};
+    if (ble_store_read_our_sec(&key, &ours) || ble_store_read_peer_sec(&key, &theirs) ||
+        !ours.ltk_present || !theirs.ltk_present || !ours.sc || !theirs.sc)
+        return false;
+    nvs_handle_t handle;
+    if (nvs_open("cube_split", NVS_READWRITE, &handle) != ESP_OK)
+        return false;
+    const char* name = Side(peer) ? "right" : "left";
+    char existing[20];
+    size_t length = sizeof(existing);
+    const int found = nvs_get_str(handle, name, existing, &length);
+    // Never overwrite manual bindings or malformed persisted records.
+    if (found != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        return false;
+    }
+    char value[20];
+    std::snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X %u", peer.address.val[5],
+                  peer.address.val[4], peer.address.val[3], peer.address.val[2],
+                  peer.address.val[1], peer.address.val[0], peer.address.type);
+    length = sizeof(existing);
+    const int other = nvs_get_str(handle, Side(peer) ? "left" : "right", existing, &length);
+    if ((other != ESP_OK && other != ESP_ERR_NVS_NOT_FOUND) ||
+        (other == ESP_OK && !std::strcmp(existing, value))) {
+        nvs_close(handle);
+        return false;
+    }
+    auto rc = nvs_set_str(handle, name, value);
+    if (rc == ESP_OK)
+        rc = nvs_commit(handle);
+    nvs_close(handle);
+    return rc == ESP_OK;
+}
 int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void* arg) {
     Peer* peer = Current(conn, arg);
     if (!peer || peer->phase != Phase::Reading)
@@ -244,6 +302,24 @@ int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void
     if (error->status || !attr || (!peer->notified_during_read && !Snapshot(*peer, attr->om))) {
         Fail(*peer, "initial position read failed");
         return 0;
+    }
+    if (peer->learning && !peer->configured) {
+        if (!SaveAutoBinding(*peer)) {
+            Fail(*peer, "automatic binding verification/storage failed");
+            return 0;
+        }
+        peer->configured = true;
+        peer->learning = false;
+        peer->auto_retry = false;
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+        CubeDualRequireNeutral();
+#elif CONFIG_CUBE_USB_DONGLE_OUTPUT
+        CubeUsbRelease();
+#endif
+        input.Apply(Side(*peer), peer->pending_positions.data(), 16, true);
+        PublishKeyboard();
+        peer->typing.Observe(peer->pending_positions, keyboard, esp_timer_get_time() / 1000);
+        ESP_LOGI(kTag, "%s automatic binding saved", Side(*peer) ? "right" : "left");
     }
     peer->phase = Phase::Ready;
     PublishStatus();
@@ -326,53 +402,119 @@ int OnService(uint16_t conn, const ble_gatt_error* error, const ble_gatt_svc* se
         Fail(*peer, "split service not found");
     return 0;
 }
+void Discover(Peer& peer);
+int OnIdentity(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void* arg) {
+    Peer* peer = Current(conn, arg);
+    if (!peer || peer->phase != Phase::Identity)
+        return 0;
+    if (!error->status && attr) {
+        uint8_t data[18];
+        if (peer->identity_seen || !attr->om || OS_MBUF_PKTLEN(attr->om) != 18 ||
+            os_mbuf_copydata(attr->om, 0, 18, data) ||
+            !cube_dongle::AutoIdentity(data, 18, Side(*peer))) {
+            Fail(*peer, "invalid/ambiguous Cube side identity");
+            return 0;
+        }
+        peer->identity_seen = true;
+    } else if (error->status == BLE_HS_EDONE && peer->identity_seen) {
+        peer->identity_verified = true;
+        peer->auto_retry = true;
+        Discover(*peer);
+    } else
+        Fail(*peer, "Cube side identity unavailable");
+    return 0;
+}
 void Discover(Peer& peer) {
     if (!Encrypted(peer)) {
         Fail(peer, "encryption or peer identity mismatch");
+        return;
+    }
+    if (peer.learning && !peer.identity_verified) {
+        peer.phase = Phase::Identity;
+        if (ble_gattc_read_by_uuid(peer.connection, 1, 0xffff, &kIdentity.u, OnIdentity,
+                                   Cookie(Side(peer))))
+            Fail(peer, "cannot read Cube side identity");
         return;
     }
     peer.phase = Phase::Service;
     if (ble_gattc_disc_svc_by_uuid(peer.connection, &kService.u, OnService, Cookie(Side(peer))))
         Fail(peer, "cannot discover split service");
 }
-bool AdvertisesSplit(const ble_gap_disc_desc& disc) {
-    ble_hs_adv_fields fields{};
-    if (ble_hs_adv_parse_fields(&fields, disc.data, disc.length_data))
-        return false;
-    for (size_t i = 0; i < fields.num_uuids128; ++i)
-        if (!ble_uuid_cmp(&fields.uuids128[i].u, &kService.u))
-            return true;
+void Connect(Peer& peer) {
+    connecting = true;
+    peer.phase = Phase::Connecting;
+    peer.learning = !peer.configured;
+    peer.identity_seen = peer.identity_verified = false;
+    peer.pending_positions = {};
+    ++peer.generation;
+    ble_gap_disc_cancel();
+    const int rc =
+        ble_gap_connect(own_address_type, &peer.address, 10000, nullptr, OnGap, Cookie(Side(peer)));
+    if (rc) {
+        peer.phase = Phase::Idle;
+        peer.learning = false;
+        peer.retry_after = esp_timer_get_time() + 5000000;
+        connecting = false;
+        Retry();
+    }
+}
+bool ConnectCandidate() {
+    for (size_t side = 0; side < 2; ++side) {
+        auto& peer = peers[side];
+        const auto& candidate = candidates[side];
+        if (peer.configured || !peer.auto_allowed || peer.phase != Phase::Idle || !candidate.seen ||
+            candidate.ambiguous || esp_timer_get_time() < peer.retry_after)
+            continue;
+        if (peer.auto_retry && (peer.address.type != candidate.identity[0] ||
+                                std::memcmp(peer.address.val, candidate.identity.data() + 1, 6)))
+            continue;
+        const auto& other = peers[side ^ 1];
+        if ((other.configured || other.learning) && other.address.type == candidate.identity[0] &&
+            !std::memcmp(other.address.val, candidate.identity.data() + 1, 6))
+            continue;
+        peer.address.type = candidate.identity[0];
+        std::memcpy(peer.address.val, candidate.identity.data() + 1, 6);
+        Connect(peer);
+        return true;
+    }
     return false;
 }
 int OnGap(ble_gap_event* event, void* arg) {
     if (event->type == BLE_GAP_EVENT_DISC) {
-        if (connecting || !AdvertisesSplit(event->disc))
+        // Known bonded halves use directed advertisements without service data.
+        if (connecting || event->disc.event_type > 1)
             return 0;
         for (size_t side = 0; side < 2; ++side) {
             auto& peer = peers[side];
-            if (!peer.configured || peer.phase != Phase::Idle ||
+            if ((!peer.configured && !peer.auto_retry) || peer.phase != Phase::Idle ||
                 esp_timer_get_time() < peer.retry_after ||
                 peer.address.type != event->disc.addr.type ||
                 std::memcmp(peer.address.val, event->disc.addr.val, 6))
                 continue;
-            connecting = true;
-            peer.phase = Phase::Connecting;
-            ++peer.generation;
-            ble_gap_disc_cancel();
-            const int rc = ble_gap_connect(own_address_type, &peer.address, 10000, nullptr, OnGap,
-                                           Cookie(side));
-            if (rc) {
-                peer.phase = Phase::Idle;
-                peer.retry_after = esp_timer_get_time() + 5000000;
-                connecting = false;
-                Retry();
-            }
-            break;
+            Connect(peer);
+            return 0;
+        }
+        // Learn only undirected Cube-specific advertisements, never generic ZMK.
+        if (event->disc.event_type != 0 || event->disc.addr.type > 1)
+            return 0;
+        for (const auto& peer : peers)
+            if (peer.configured && peer.address.type == event->disc.addr.type &&
+                !std::memcmp(peer.address.val, event->disc.addr.val, 6))
+                return 0;
+        const int side = cube_dongle::AutoSide(event->disc.data, event->disc.length_data);
+        if (side >= 0 && peers[side].auto_allowed && !peers[side].configured) {
+            char address[18];
+            const auto* b = event->disc.addr.val;
+            std::snprintf(address, sizeof(address), "%02X:%02X:%02X:%02X:%02X:%02X", b[5], b[4],
+                          b[3], b[2], b[1], b[0]);
+            cube_dongle::PeerBinding identity;
+            if (cube_dongle::ParseIdentity(address, event->disc.addr.type, identity))
+                candidates[side].Observe(b, event->disc.addr.type);
         }
         return 0;
     }
     if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
-        if (!connecting)
+        if (!connecting && !ConnectCandidate())
             Retry();
         return 0;
     }
@@ -386,6 +528,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         connecting = false;
         if (event->connect.status) {
             peer.phase = Phase::Idle;
+            peer.learning = false;
             peer.retry_after = esp_timer_get_time() + 5000000;
         } else {
             peer.connection = event->connect.conn_handle;
@@ -411,6 +554,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         ble_npl_callout_stop(&peer.timeout);
         peer.connection = BLE_HS_CONN_HANDLE_NONE;
         peer.phase = Phase::Idle;
+        peer.learning = false;
         ++peer.generation;
         peer.retry_after = esp_timer_get_time() + 5000000;
         ESP_LOGI(kTag, "%s disconnected; its positions released", (cookie & 1) ? "right" : "left");
@@ -440,7 +584,7 @@ void Scan(ble_npl_event*) {
         return;
     bool wanted = false;
     for (const auto& peer : peers)
-        wanted |= peer.configured && peer.phase == Phase::Idle;
+        wanted |= (peer.configured || peer.auto_allowed) && peer.phase == Phase::Idle;
     if (!wanted)
         return;
     ble_gap_disc_params params{};
@@ -448,6 +592,8 @@ void Scan(ble_npl_event*) {
     params.itvl = 0x100;
     params.window = 0x30;
     params.filter_duplicates = 1;
+    candidates[0] = {};
+    candidates[1] = {};
     if (ble_gap_disc(own_address_type, 5000, &params, OnGap, nullptr))
         Retry();
 }
@@ -464,7 +610,8 @@ void LoadBinding(Peer& peer, const char* key, const char* fallback, int fallback
     nvs_handle_t handle;
     char value[20];
     size_t size = sizeof(value);
-    if (nvs_open("cube_split", NVS_READONLY, &handle) == ESP_OK) {
+    const auto opened = nvs_open("cube_split", NVS_READONLY, &handle);
+    if (opened == ESP_OK) {
         const int rc = nvs_get_str(handle, key, value, &size);
         nvs_close(handle);
         if (rc == ESP_OK) {
@@ -476,8 +623,12 @@ void LoadBinding(Peer& peer, const char* key, const char* fallback, int fallback
         }
         if (rc != ESP_ERR_NVS_NOT_FOUND)
             return;
-    }
+    } else if (opened != ESP_ERR_NVS_NOT_FOUND)
+        return;
     Configure(peer, fallback, fallback_type);
+#if CONFIG_CUBE_SPLIT_AUTO_BIND
+    peer.auto_allowed = !peer.configured && fallback[0] == '\0';
+#endif
 }
 void OnSync() {
     if (ble_hs_util_ensure_addr(0) || ble_hs_id_infer_auto(0, &own_address_type))
@@ -517,6 +668,7 @@ void OnReset(int reason) {
             ble_npl_callout_stop(&peers[side].timeout);
         peers[side].connection = BLE_HS_CONN_HANDLE_NONE;
         peers[side].phase = Phase::Idle;
+        peers[side].learning = false;
         ++peers[side].generation;
     }
     PublishKeyboard();
@@ -546,7 +698,8 @@ void StartCubeSplitBench() {
     ESP_LOGW(kTag, "Bench input only, USB/BLE HID OFF. Allowlist: left=%d right=%d",
              peers[0].configured, peers[1].configured);
 #if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
-    if (!peers[0].configured && !peers[1].configured) {
+    if (!peers[0].configured && !peers[1].configured && !peers[0].auto_allowed &&
+        !peers[1].auto_allowed) {
         ESP_LOGW(kTag,
                  "Configure fixed public/static identity addresses before testing; no automatic "
                  "pairing");
@@ -582,7 +735,7 @@ void StartCubeSplitBench() {
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
 bool CubeSplitIsKeyboard(const uint8_t* address, uint8_t type) {
     for (const auto& peer : peers)
-        if (peer.configured && peer.address.type == type &&
+        if ((peer.configured || peer.learning) && peer.address.type == type &&
             !std::memcmp(address, peer.address.val, 6))
             return true;
     return false;
@@ -600,6 +753,7 @@ std::string CubeSplitBenchBind(const std::string& command) {
     cube_dongle::BindRequest request;
     if (!cube_dongle::ParseBindCommand(command, request))
         return "ERR INVALID-BIND";
+    std::lock_guard<std::mutex> lock(binding_mutex);
     nvs_handle_t handle;
     if (nvs_open("cube_split", NVS_READWRITE, &handle) != ESP_OK)
         return "ERR NVS-OPEN";
