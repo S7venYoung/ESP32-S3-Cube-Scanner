@@ -1,9 +1,13 @@
 #include "cube_usb_dongle.h"
 #include <esp_log.h>
 #include <esp_mac.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 #include <class/hid/hid_device.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <soc/rtc_cntl_reg.h>
+#include <soc/usb_serial_jtag_reg.h>
 #include <tinyusb.h>
 #include <tinyusb_cdc_acm.h>
 #include <tinyusb_default_config.h>
@@ -90,11 +94,39 @@ void ReleaseLocked() {
     report_cache = {};
     portEXIT_CRITICAL(&cache_mux);
 }
+std::atomic<bool> download_requested{false};
+void DownloadShutdown() {
+    // Restore the internal PHY to hardware Serial/JTAG, not the application's OTG CDC.
+    CLEAR_PERI_REG_MASK(RTC_CNTL_USB_CONF_REG, RTC_CNTL_SW_HW_USB_PHY_SEL |
+                                                   RTC_CNTL_SW_USB_PHY_SEL |
+                                                   RTC_CNTL_USB_PAD_ENABLE);
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_PHY_SEL);
+    SET_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    SET_PERI_REG_MASK(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+}
 void Worker(void*) {
+    int64_t download_started = 0;
     bool inflight = false;
     unsigned phase = 0;
     uint32_t ticket = 0, epoch = link_epoch.load();
     for (;;) {
+        if (download_requested && !download_started) {
+            if (esp_register_shutdown_handler(DownloadShutdown) != ESP_OK) {
+                download_requested = false;
+                ESP_LOGE(kTag, "Cannot register download restart; no restart performed");
+            } else {
+                std::lock_guard<std::mutex> lock(mutex);
+                enabled = false;
+                ReleaseLocked();
+                download_started = esp_timer_get_time();
+            }
+        }
+        if (download_started && esp_timer_get_time() - download_started >= 250000) {
+            // Give the USB host time to receive neutral reports, then re-enumerate ROM.
+            tud_disconnect();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            esp_restart();
+        }
         const uint32_t now_epoch = link_epoch.load();
         if (epoch != now_epoch) {
             std::lock_guard<std::mutex> lock(mutex);
@@ -245,6 +277,12 @@ void CubeUsbRelease() {
 }
 bool CubeUsbConnected() { return tud_mounted() && !tud_suspended(); }
 bool CubeUsbAttached() { return tud_mounted(); }
+bool CubeUsbEnterDownload() {
+    if (!CubeUsbAttached())
+        return false;
+    download_requested = true;
+    return true;
+}
 bool CubeUsbNeutralDelivered() { return neutral_delivered.load(); }
 const uint8_t* CubeUsbReportMap(size_t& size) {
     size = sizeof(report_map);

@@ -12,6 +12,9 @@
 #if CONFIG_ZMK_SCANNER_MODE
 #include "scanner/codex_scanner_display.h"
 #include "scanner/zmk_scanner.h"
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#include "scanner/cube_usb_dongle.h"
+#endif
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
 #include "scanner/cube_ble_dongle.h"
 #endif
@@ -105,6 +108,10 @@ private:
         boot_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
             Application::GetInstance().Schedule([this]() {
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+                if (CubeUsbEnterDownload())
+                    return;
+#endif
                 Application::GetInstance().SetDeviceState(kDeviceStateWifiConfiguring);
                 EnterWifiConfigMode();
             });

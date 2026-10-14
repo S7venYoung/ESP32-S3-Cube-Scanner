@@ -12,5 +12,6 @@ bool CubeUsbEnabled();
 void CubeUsbRelease();
 bool CubeUsbConnected();
 bool CubeUsbAttached();
+bool CubeUsbEnterDownload();
 bool CubeUsbNeutralDelivered();
 const uint8_t* CubeUsbReportMap(size_t& size);
