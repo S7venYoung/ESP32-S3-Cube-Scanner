@@ -279,9 +279,9 @@ bool SaveAutoBinding(Peer& peer) {
         return false;
     }
     char value[20];
-    std::snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X %u", peer.address.val[5],
+    std::snprintf(value, sizeof(value), "%02X:%02X:%02X:%02X:%02X:%02X %c", peer.address.val[5],
                   peer.address.val[4], peer.address.val[3], peer.address.val[2],
-                  peer.address.val[1], peer.address.val[0], peer.address.type);
+                  peer.address.val[1], peer.address.val[0], '0' + (peer.address.type & 1));
     length = sizeof(existing);
     const int other = nvs_get_str(handle, Side(peer) ? "left" : "right", existing, &length);
     if ((other != ESP_OK && other != ESP_ERR_NVS_NOT_FOUND) ||
