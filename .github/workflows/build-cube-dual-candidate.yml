@@ -1,7 +1,7 @@
 name: Build Cube USB and BLE dongle candidate
 on:
   push:
-    branches: [codex/xingzhi-cube-dongle, codex/xingzhi-cube-dya-full]
+    branches: [codex/xingzhi-cube-dongle]
     paths:
       - 'main/**'
       - 'experimental/cube_dongle/**'
