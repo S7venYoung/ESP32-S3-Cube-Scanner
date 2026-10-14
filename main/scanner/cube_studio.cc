@@ -16,6 +16,7 @@
 #include "../../experimental/cube_dongle/studio_watchdog.h"
 #include "application.h"
 #include "cube_ble_dongle.h"
+#include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
 
 namespace {
@@ -399,7 +400,7 @@ void CubeStudioPoll() {
                                                                : 0;
             if (state != current)
                 return;
-            if (state && !app.CanEnterSleepMode()) {
+            if (state && (!app.CanEnterSleepMode() || (CubeSplitBenchStatus() >> 8))) {
                 CubeStudioActivityWake();
                 return;
             }
