@@ -19,6 +19,9 @@ bool CubeDualBleReady();
 int CubeDualProfile();
 std::string CubeDualStatus();
 #if CONFIG_CUBE_STUDIO_RPC
+#include "../../experimental/cube_dongle/studio_protocol.h"
+cube_dongle::studio::Bytes CubeBleManagement(const cube_dongle::studio::Bytes& payload,
+                                             bool unlocked);
 bool CubeBleStudioReady();
 uint32_t CubeBleStudioEpoch();
 size_t CubeBleStudioRead(uint8_t* bytes, size_t capacity, uint32_t& epoch);

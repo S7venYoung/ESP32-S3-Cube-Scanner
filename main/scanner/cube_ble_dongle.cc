@@ -1,6 +1,8 @@
 #include "cube_ble_dongle.h"
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <host/ble_att.h>
 #include <host/ble_gap.h>
 #include <host/ble_gatt.h>
@@ -16,6 +18,7 @@
 #include <cstring>
 #if CONFIG_CUBE_STUDIO_RPC
 #include <mutex>
+#include "../../experimental/cube_dongle/studio_diagnostics.h"
 #include "../../experimental/cube_dongle/studio_transport.h"
 #endif
 #include "../../experimental/cube_dongle/host_control.h"
@@ -78,6 +81,16 @@ HostRequest pending;
 ble_npl_callout output_timer;
 bool timer_initialized = false;
 bool transition = false, old_ble = false;
+#if CONFIG_CUBE_STUDIO_RPC
+std::mutex management_mutex;
+struct ManagementSnapshot {
+    Profile profiles[5];
+    unsigned selected = 0;
+    bool connected = false;
+    Output output = Output::Auto;
+} management;
+std::array<std::string, 5> profile_names;
+#endif
 std::atomic<int> last_result{0};  // zero success, positive NimBLE, negative NVS/configuration
 
 void ReleaseBle() {
@@ -156,6 +169,13 @@ int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
 void Publish() {
 #if CONFIG_CUBE_STUDIO_RPC
     StudioPublish();
+    {
+        std::lock_guard<std::mutex> lock(management_mutex);
+        std::copy(std::begin(profiles), std::end(profiles), std::begin(management.profiles));
+        management.selected = selected;
+        management.connected = authorized && Encrypted();
+        management.output = preference;
+    }
 #endif
     public_status = (enabled ? 1u : 0u) | (routed_ble ? 2u : 0u) | (NotifyReady() ? 4u : 0u) |
                     (selected << 8) | (static_cast<unsigned>(preference) << 16) |
@@ -651,7 +671,7 @@ void ApplyPending() {
     if (request.command == HostCommand::Ble)
         next_output = Output::Ble;
     if (request.command == HostCommand::Select || request.command == HostCommand::Clear ||
-        request.command == HostCommand::ClearAll) {
+        request.command == HostCommand::ClearAll || request.command == HostCommand::ClearSlot) {
         if (connection != BLE_HS_CONN_HANDLE_NONE) {
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             return;
@@ -660,6 +680,8 @@ void ApplyPending() {
     bool okay = SaveSelection(next_profile, next_output);
     if (okay && request.command == HostCommand::Clear)
         okay = ClearSlot(selected);
+    if (okay && request.command == HostCommand::ClearSlot)
+        okay = request.profile < 5 && ClearSlot(request.profile);
     if (okay && request.command == HostCommand::ClearAll)
         for (unsigned i = 0; i < 5; ++i)
             if (!ClearSlot(i)) {
@@ -723,6 +745,13 @@ bool CubeBleHostInit() {
             valid = false;
         for (unsigned i = 0; i < 5; ++i) {
             char key[4];
+#if CONFIG_CUBE_STUDIO_RPC
+            char name[32]{};
+            size_t name_size = sizeof(name);
+            std::snprintf(key, sizeof(key), "n%u", i);
+            if (nvs_get_str(handle, key, name, &name_size) == ESP_OK)
+                profile_names[i] = name;
+#endif
             std::snprintf(key, sizeof(key), "p%u", i);
             uint8_t blob[7];
             size_t size = sizeof(blob);
@@ -824,7 +853,8 @@ void CubeDualTick() {
     if (transition && OldReleased() && physical_neutral) {
         // Keep the request until the disconnect callback has completed.
         if ((pending.command == HostCommand::Select || pending.command == HostCommand::Clear ||
-             pending.command == HostCommand::ClearAll) &&
+             pending.command == HostCommand::ClearAll ||
+             pending.command == HostCommand::ClearSlot) &&
             connection != BLE_HS_CONN_HANDLE_NONE)
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
         else
@@ -891,6 +921,106 @@ std::string CubeDualCommand(const std::string& line) {
 }
 uint32_t CubeDualNotice() { return ui_notice.load(); }
 #if CONFIG_CUBE_STUDIO_RPC
+cube_dongle::studio::Bytes CubeBleManagement(const cube_dongle::studio::Bytes& payload,
+                                             bool unlocked) {
+    namespace wire = cube_dongle::studio;
+    wire::Reader request(payload);
+    const auto* op = request.Operation();
+    if (!request.valid || !op || op->wire != 2)
+        return wire::CustomError("Malformed BLE management request");
+    wire::Reader args(op->data, op->size);
+    if (!args.valid || !args.Numbers({1}))
+        return wire::CustomError("Malformed BLE management arguments");
+    wire::Bytes body, result;
+    ManagementSnapshot snapshot;
+    std::array<std::string, 5> names;
+    {
+        std::lock_guard<std::mutex> lock(management_mutex);
+        snapshot = management;
+        names = profile_names;
+    }
+    const uint64_t index = args.Value(1);
+    if (op->tag == 1) {
+        for (unsigned i = 0; i < 5; ++i) {
+            wire::Bytes item;
+            wire::Number(item, 1, i);
+            wire::Text(item, 2, names[i]);
+            if (snapshot.profiles[i].bound) {
+                const auto* a = snapshot.profiles[i].identity.val;
+                char address[18];
+                std::snprintf(address, sizeof(address), "%02X:%02X:%02X:%02X:%02X:%02X", a[5], a[4],
+                              a[3], a[2], a[1], a[0]);
+                wire::Text(item, 3, address);
+            }
+            wire::Number(item, 4, i == snapshot.selected && snapshot.connected);
+            wire::Number(item, 5, !snapshot.profiles[i].bound);
+            wire::Number(item, 6, i == snapshot.selected);
+            wire::Message(body, 1, item);
+        }
+        wire::Number(body, 2, 5);
+    } else if (op->tag == 5) {
+        wire::Bytes info;
+        wire::Number(info, 1, 1);
+        wire::Number(info, 2, 1);
+        wire::Number(info, 3, (CubeSplitBenchStatus() & 12) != 0);
+        wire::Message(body, 1, info);
+    } else if (op->tag == 8) {
+        wire::Number(body, 1, snapshot.output == Output::Ble ? 1 : 0);
+    } else {
+        if (!unlocked)
+            return wire::CustomError("Studio is locked");
+        if ((op->tag == 2 || op->tag == 3 || op->tag == 4) && index >= 5)
+            return wire::CustomError("Invalid profile index");
+        bool okay = false;
+        if (op->tag == 2) {
+            const auto* name = args.Get(2);
+            if (!name || name->wire != 2 || name->size > 31 ||
+                std::memchr(name->data, 0, name->size))
+                return wire::CustomError("Invalid profile name");
+            const std::string value(reinterpret_cast<const char*>(name->data), name->size);
+            nvs_handle_t handle;
+            if (nvs_open("cube_hosts", NVS_READWRITE, &handle) == ESP_OK) {
+                char key[4];
+                std::snprintf(key, sizeof(key), "n%u", unsigned(index));
+                okay = nvs_set_str(handle, key, value.c_str()) == ESP_OK &&
+                       nvs_commit(handle) == ESP_OK;
+                nvs_close(handle);
+                if (okay) {
+                    std::lock_guard<std::mutex> lock(management_mutex);
+                    profile_names[index] = value;
+                }
+            }
+        } else if (op->tag == 3 || op->tag == 4 || op->tag == 7) {
+            if (CubeSplitBenchStatus() >> 8)
+                return wire::CustomError("Release keyboard keys before changing host");
+            HostRequest action;
+            if (op->tag == 3)
+                action = {HostCommand::Select, uint8_t(index)};
+            else if (op->tag == 4)
+                action = {HostCommand::ClearSlot, uint8_t(index)};
+            else if (index <= 1)
+                action = {index ? HostCommand::Ble : HostCommand::Usb, 0};
+            else
+                return wire::CustomError("Invalid output priority");
+            uint32_t expected = 0;
+            const uint32_t ticket = (next_ticket.fetch_add(1) % 65535) + 1;
+            const uint32_t message =
+                uint32_t(action.command) | (action.profile << 8) | (ticket << 16);
+            if (!mailbox.compare_exchange_strong(expected, message))
+                return wire::CustomError("Host management busy");
+            const int64_t deadline = esp_timer_get_time() + 2000000;
+            while (done_ticket.load() != ticket && esp_timer_get_time() < deadline)
+                vTaskDelay(pdMS_TO_TICKS(5));
+            if (done_ticket.load() != ticket)
+                return wire::CustomError("Host change pending; read profiles before retrying");
+            okay = command_result.load() == 0;
+        } else
+            return wire::CustomError("Split bond reset relay not implemented");
+        wire::Number(body, 1, okay);
+    }
+    wire::Message(result, op->tag + 1, body);
+    return result;
+}
 bool CubeBleStudioReady() { return studio_ready.load(); }
 uint32_t CubeBleStudioEpoch() { return studio_epoch.load(); }
 size_t CubeBleStudioRead(uint8_t* bytes, size_t capacity, uint32_t& epoch) {

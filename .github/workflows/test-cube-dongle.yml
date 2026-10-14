@@ -25,6 +25,8 @@ jobs:
           /tmp/cube-optional-input-test
           clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/studio_transport_test.cc -o /tmp/cube-studio-transport-test
           /tmp/cube-studio-transport-test
+          clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined experimental/cube_dongle/studio_custom_test.cc -o /tmp/cube-studio-custom-test
+          /tmp/cube-studio-custom-test
       - name: Check build configuration and USB diagnostic parsing
         run: |
           python3 -m venv /tmp/cube-studio-proto

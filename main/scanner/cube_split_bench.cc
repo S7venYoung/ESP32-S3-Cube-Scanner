@@ -80,6 +80,7 @@ cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 void PublishKeyboard() {
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioRefreshKeymap(keyboard);
+    CubeStudioRecordPositions(input.Combined());
 #endif
     keyboard.Apply(input.Combined());
 #if CONFIG_CUBE_USB_DONGLE_OUTPUT

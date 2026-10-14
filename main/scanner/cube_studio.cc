@@ -1,11 +1,15 @@
 #include "cube_studio.h"
+#include <esp_app_desc.h>
+#include <esp_flash.h>
 #include <esp_log.h>
 #include <esp_mac.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <nvs.h>
 #include <atomic>
 #include <cstdio>
 #include <mutex>
+#include "../../experimental/cube_dongle/studio_diagnostics.h"
 #include "../../experimental/cube_dongle/studio_protocol.h"
 #include "cube_ble_dongle.h"
 #include "cube_usb_dongle.h"
@@ -13,6 +17,39 @@
 namespace {
 namespace wire = cube_dongle::studio;
 wire::Rpc rpc;
+wire::Diagnostics diagnostics;
+std::mutex diagnostics_mutex;
+wire::Bytes DeviceInfo(const wire::Bytes& payload, bool) {
+    wire::Reader request(payload);
+    const auto* op = request.Operation();
+    if (!request.valid || !op || op->tag != 1 || op->wire != 2)
+        return wire::CustomError("Invalid device info request");
+    const auto* app = esp_app_get_description();
+    wire::Bytes build, hardware, config, runtime, body, response;
+    wire::Text(build, 1, "Cube ESP-IDF / ZMK-compatible RPC");
+    wire::Text(build, 3, app->version);
+    wire::Text(build, 5, "Cube DYA adapter");
+    wire::Text(build, 7, app->idf_ver);
+    wire::Text(build, 8, std::string(app->date) + " " + app->time);
+    wire::Text(build, 9, "nologo-xingzhi-cube-1.54tft-wifi");
+    wire::Text(hardware, 1, rpc.serial);
+    wire::Number(hardware, 2, esp_reset_reason());
+    uint32_t flash_size = 0;
+    if (esp_flash_get_size(nullptr, &flash_size) == ESP_OK)
+        wire::Number(hardware, 3, flash_size / 1024);
+    wire::Text(config, 1, "Cube remote BLE split positions");
+    for (auto field : {2u, 4u, 5u, 7u, 10u})
+        wire::Number(config, field, 1);
+    wire::Number(config, 3, 5);
+    wire::Text(config, 6, "central");
+    wire::Number(runtime, 1, uint32_t(esp_timer_get_time() / 1000));
+    wire::Message(body, 1, build);
+    wire::Message(body, 2, hardware);
+    wire::Message(body, 4, config);
+    wire::Message(body, 5, runtime);
+    wire::Message(response, 2, body);
+    return response;
+}
 struct Session {
     wire::Framer framer;
     bool connected = false, unlocked = false, used = false;
@@ -102,7 +139,23 @@ void CubeStudioInitialize() {
             rpc.serial = serial;
         }
         UpdateCache();
+        rpc.custom.push_back({"zmk__device_info",
+                              "https://cormoran.github.io/zmk-feature-device-info/", DeviceInfo});
+        rpc.custom.push_back({"cormoran_ble",
+                              "https://cormoran.github.io/zmk-module-ble-management/",
+                              CubeBleManagement});
+        rpc.custom.push_back({"cormoran__kscan_diagnostics",
+                              "https://cormoran.github.io/zmk-feature-kscan-diagnostics/",
+                              [](const wire::Bytes& payload, bool unlocked) {
+                                  std::lock_guard<std::mutex> lock(diagnostics_mutex);
+                                  return diagnostics.Handle(payload, unlocked,
+                                                            uint32_t(esp_timer_get_time() / 1000));
+                              }});
     });
+}
+void CubeStudioRecordPositions(const cube_dongle::SplitState::Snapshot& positions) {
+    std::lock_guard<std::mutex> lock(diagnostics_mutex);
+    diagnostics.Sample(positions, uint32_t(esp_timer_get_time() / 1000));
 }
 void CubeStudioPoll() {
     const int64_t now = esp_timer_get_time();

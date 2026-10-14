@@ -384,6 +384,11 @@ inline Bytes PhysicalLayouts() {
 class Rpc {
 public:
     using Save = std::function<bool(const Bytes&)>;
+    struct CustomSubsystem {
+        std::string identifier, ui_url;
+        std::function<Bytes(const Bytes&, bool)> handle;
+    };
+    std::vector<CustomSubsystem> custom;
     Model model;
     Rpc() : saved_(model.Export()) {}
     void Load(const Bytes& data) {
@@ -448,9 +453,36 @@ public:
             } else
                 return Error(id, 2);
         } else if (subsystem->tag == 100) {
-            if (op->tag != 1 || op->wire != 2)
+            if (op->wire != 2)
+                return Error(id, 3);
+            if (op->tag == 1) {
+                Bytes list;
+                for (size_t i = 0; i < custom.size(); ++i) {
+                    Bytes info;
+                    Number(info, 1, i);
+                    Text(info, 2, custom[i].identifier);
+                    Text(info, 3, custom[i].ui_url);
+                    Message(list, 1, info);
+                }
+                Message(reply, 1, list);
+            } else if (op->tag == 2) {
+                Reader call(op->data, op->size);
+                const auto* data = call.Get(2);
+                if (!call.valid || !call.Numbers({1}) || !data || data->wire != 2)
+                    return Error(id, 3);
+                const auto index = call.Value(1);
+                if (index >= custom.size() || !custom[index].handle)
+                    return Error(id, 2);
+                Bytes input(data->data, data->data + data->size);
+                const auto result = custom[index].handle(input, unlocked_);
+                if (result.size() > kLimit - 32)
+                    return Error(id, 3);
+                Bytes response;
+                Number(response, 1, index);
+                Message(response, 2, result);
+                Message(reply, 2, response);
+            } else
                 return Error(id, 2);
-            Message(reply, 1, {});
         } else if (subsystem->tag == 4) {
             if (op->tag == 1 && op->wire == 0) {
                 Bytes list;

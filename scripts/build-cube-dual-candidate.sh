@@ -5,6 +5,8 @@ g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/state_test.cc -o /
 /tmp/cube-dongle-state-test
 g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/studio_test.cc -o /tmp/cube-studio-test
 /tmp/cube-studio-test
+g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/studio_custom_test.cc -o /tmp/cube-studio-custom-test
+/tmp/cube-studio-custom-test
 python scripts/build.py nologo/xingzhi-cube-1.54tft-wifi --name xingzhi-cube-1.54tft-wifi-dual-dongle-candidate --language zh-CN --wake-word nihaoxiaozhi
 grep -qx 'CONFIG_CUBE_BLE_DONGLE_OUTPUT=y' sdkconfig
 grep -qx 'CONFIG_CUBE_SPLIT_AUTO_BIND=y' sdkconfig
