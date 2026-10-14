@@ -3,6 +3,7 @@ Pinned custom RPC schemas for independent interoperability tests (not generated 
 https://github.com/cormoran/zmk-feature-runtime-macro/tree/38530962eb7061b60efcb98e84585cfb1f0cb6de
 https://github.com/cormoran/zmk-feature-watchdog/tree/84ad14c6c3645dc40b23f45d08ab45418655f912
 https://github.com/cormoran/zmk-feature-kscan-diagnostics/tree/1432f7fe0cfe903cd7d3c9931ae6bd6f2e1f328e
+https://github.com/cormoran/zmk-feature-runtime-combo/tree/d9490e7b5d41c516221d131241009e81740efcee
 
 MIT License
 

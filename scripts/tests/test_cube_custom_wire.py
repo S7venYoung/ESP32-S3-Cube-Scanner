@@ -22,6 +22,7 @@ class CustomWireTest(unittest.TestCase):
         cls.macro = importlib.import_module('runtime_macro_pb2')
         cls.diagnostics = importlib.import_module('kscan_diagnostics_pb2')
         cls.watchdog = importlib.import_module('watchdog_pb2')
+        cls.combo = importlib.import_module('runtime_combo_pb2')
         cls.binary = cls.target / 'custom-test'
         subprocess.run([shutil.which('clang++') or 'g++', '-std=c++17', '-Wall', '-Wextra', '-Werror', str(ROOT / 'experimental/cube_dongle/studio_custom_test.cc'), '-o', str(cls.binary)], check=True, capture_output=True)
 
@@ -57,7 +58,7 @@ class CustomWireTest(unittest.TestCase):
         self.assertFalse(escaped)
         return self.studio.Response.FromString(payload)
 
-    def call(self, module, index, field, **arguments):
+    def call(self, module, subsystem_index, field, **arguments):
         inner = module.Request()
         body = getattr(inner, field)
         body.SetInParent()
@@ -65,15 +66,17 @@ class CustomWireTest(unittest.TestCase):
             target = getattr(body, name)
             if hasattr(target, 'CopyFrom'):
                 target.CopyFrom(value)
+            elif isinstance(value, (list, tuple)):
+                target.extend(value)
             else:
                 setattr(body, name, value)
         request = self.studio.Request(request_id=self.sequence)
         self.sequence += 1
-        request.custom.call.subsystem_index = index
+        request.custom.call.subsystem_index = subsystem_index
         request.custom.call.payload = inner.SerializeToString()
         response = self.exchange(request.SerializeToString().hex()).request_response
         self.assertEqual(response.request_id, request.request_id)
-        self.assertEqual(response.custom.call.subsystem_index, index)
+        self.assertEqual(response.custom.call.subsystem_index, subsystem_index)
         return module.Response.FromString(response.custom.call.payload)
 
     def test_registry(self):
@@ -81,8 +84,41 @@ class CustomWireTest(unittest.TestCase):
         request.custom.list_custom_subsystems.SetInParent()
         response = self.exchange(request.SerializeToString().hex()).request_response
         subsystems = response.custom.list_custom_subsystems.subsystems
-        self.assertEqual([s.identifier for s in subsystems], ['cormoran__runtime_macro', 'cormoran__kscan_diagnostics', 'cormoran__watchdog'])
-        self.assertEqual([s.index for s in subsystems], [0, 1, 2])
+        self.assertEqual([s.identifier for s in subsystems], ['cormoran__runtime_macro', 'cormoran__kscan_diagnostics', 'cormoran__watchdog', 'cormoran__runtime_combo'])
+        self.assertEqual([s.index for s in subsystems], [0, 1, 2, 3])
+
+    def test_combo_config_persist_and_reload(self):
+        c = self.combo
+        binding = c.BehaviorBinding(behavior_id=1, param1=0x70028)
+        args = dict(index=0, key_positions=[0, 1], behavior=binding, enabled=True, layer_mask=3,
+                    timeout_ms=35, require_prior_idle_ms=100, slow_release_override=1, persist=True)
+        self.assertEqual(self.call(c, 3, 'set_combo', **args).WhichOneof('response_type'), 'error')
+        self.exchange('unlock')
+        self.assertEqual(self.call(c, 3, 'set_combo', **args).WhichOneof('response_type'), 'status')
+        self.call(c, 3, 'set_combo_name', index=0, name='Enter', persist=True)
+        self.exchange('reload')
+        combo = self.call(c, 3, 'get_combo', index=0).get_combo.combo
+        self.assertEqual((combo.name, list(combo.key_positions), combo.behavior.param1), ('Enter', [0, 1], 0x70028))
+        self.assertEqual((combo.layer_mask, combo.timeout_ms, combo.require_prior_idle_ms, combo.slow_release_override), (3, 35, 100, 1))
+        self.assertTrue(combo.enabled)
+        self.assertEqual(combo.source, c.COMBO_SOURCE_RUNTIME)
+        self.assertEqual(len(self.call(c, 3, 'list_combos').list_combos.combos), 8)
+        self.call(c, 3, 'delete_combo', index=0, persist=True)
+        self.exchange('reload')
+        self.assertFalse(self.call(c, 3, 'get_combo', index=0).get_combo.combo.enabled)
+
+    def test_combo_invalid_positions_and_failed_flash(self):
+        c = self.combo
+        self.exchange('unlock')
+        binding = c.BehaviorBinding(behavior_id=1, param1=0x70028)
+        for keys in ([0, 0], [0, 61], [0], [0, 1, 2, 3, 4]):
+            response = self.call(c, 3, 'set_combo', index=0, key_positions=keys, behavior=binding, enabled=True)
+            self.assertEqual(response.WhichOneof('response_type'), 'error')
+        self.call(c, 3, 'set_combo', index=0, key_positions=[0, 1], behavior=binding, enabled=True, persist=True)
+        self.exchange('fail-save')
+        response = self.call(c, 3, 'set_combo_name', index=0, name='not-saved', persist=True)
+        self.assertEqual(response.WhichOneof('response_type'), 'error')
+        self.assertEqual(self.call(c, 3, 'get_combo', index=0).get_combo.combo.name, '')
 
     def test_macro_edit_save_reload(self):
         m = self.macro

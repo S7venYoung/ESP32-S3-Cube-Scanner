@@ -23,6 +23,11 @@ namespace {
 namespace wire = cube_dongle::studio;
 wire::Rpc rpc;
 wire::RuntimeMacros macros;
+wire::RuntimeCombos combos;
+wire::ComboEngine combo_engine;
+wire::ComboModel combo_cache;
+std::mutex combo_mutex;
+uint32_t combo_revision = 1, combo_seen = 0;
 wire::WatchdogLog watchdog_log;
 bool watchdog_subscribed = false;
 bool SaveRecord(const char* key, const wire::Bytes& bytes) {
@@ -293,6 +298,13 @@ void CubeStudioInitialize() {
                 if (nvs_get_blob(handle, "watchdog_v1", record.data(), &size) == ESP_OK)
                     watchdog_log.Load(record);
             }
+            size = 0;
+            if (nvs_get_blob(handle, "combos_v1", nullptr, &size) == ESP_OK && size > 0 &&
+                size <= 1024) {
+                wire::Bytes record(size);
+                if (nvs_get_blob(handle, "combos_v1", record.data(), &size) == ESP_OK)
+                    combos.Load(record);
+            }
             nvs_close(handle);
         }
         uint8_t mac[6];
@@ -304,6 +316,21 @@ void CubeStudioInitialize() {
         }
         UpdateCache();
         macro_cache = macros.model;
+        combo_cache = combos.model;
+        rpc.custom.push_back(
+            {"cormoran__runtime_combo", "https://cormoran.github.io/zmk-feature-runtime-combo/",
+             [](const wire::Bytes& payload, bool unlocked) {
+                 const auto before = combos.model.Export();
+                 auto response = combos.Handle(payload, unlocked, [](const wire::Bytes& bytes) {
+                     return SaveRecord("combos_v1", bytes);
+                 });
+                 if (before != combos.model.Export()) {
+                     std::lock_guard<std::mutex> lock(combo_mutex);
+                     combo_cache = combos.model;
+                     ++combo_revision;
+                 }
+                 return response;
+             }});
         activity_last = esp_timer_get_time();
         watchdog_log.Boot(ResetBits());
         if (!SaveRecord("watchdog_v1", watchdog_log.Export()))
@@ -367,7 +394,34 @@ cube_dongle::ReportFrame CubeStudioMacroOutput(cube_dongle::ReportFrame physical
         activity_last = esp_timer_get_time();
     return macro_player.Merge(physical);
 }
-void CubeStudioCancelMacros() { macro_player.Cancel(); }
+void CubeStudioCancelMacros() {
+    macro_player.Cancel();
+    if (!combo_engine.Neutral())
+        combo_engine.Cancel();
+}
+uint8_t CubeStudioCurrentModifiers(uint8_t physical_modifiers) {
+    cube_dongle::ReportFrame physical;
+    physical.keyboard[0] = physical_modifiers;
+    return macro_player.Merge(physical).keyboard[0];
+}
+wire::ComboResult CubeStudioFilterPositions(const cube_dongle::SplitState::Snapshot& raw,
+                                            size_t layer) {
+    if (combo_engine.Neutral()) {
+        std::lock_guard<std::mutex> lock(combo_mutex);
+        if (combo_revision != combo_seen && combo_engine.Configure(combo_cache))
+            combo_seen = combo_revision;
+    }
+    auto result = combo_engine.Apply(raw, uint32_t(esp_timer_get_time() / 1000), layer);
+    if (result.macro_mask) {
+        std::lock_guard<std::mutex> lock(macro_mutex);
+        for (size_t slot = 0; slot < 8; ++slot)
+            if (result.macro_mask & (1u << slot))
+                macro_player.Start(macro_cache.entries[slot], macro_cache.tap_ms,
+                                   uint32_t(esp_timer_get_time() / 1000));
+    }
+    return result;
+}
+bool CubeStudioCombosNeedTick() { return combo_engine.NeedsTick(); }
 void CubeStudioSetActivityHandler(std::function<void(unsigned)> handler) {
     std::lock_guard<std::mutex> lock(activity_mutex);
     activity_handler = std::move(handler);

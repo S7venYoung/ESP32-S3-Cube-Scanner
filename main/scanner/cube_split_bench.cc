@@ -81,30 +81,62 @@ cube_dongle::KeyboardState<61, 4> keyboard(cube_dongle::VelvetStudioKeymap());
 #else
 cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 #endif
+cube_dongle::ReportFrame keyboard_output;
 void PublishKeyboard() {
+    const auto physical = input.Combined();
+    auto filtered = physical;
+    cube_dongle::SplitState::Snapshot taps{};
+#if CONFIG_CUBE_STUDIO_RPC
+    cube_dongle::ReportFrame extra;
+#endif
+    uint16_t extra_actions = 0;
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioRefreshKeymap(keyboard);
-    CubeStudioRecordPositions(input.Combined());
+    CubeStudioRecordPositions(physical);
+    const auto combo = CubeStudioFilterPositions(physical, keyboard.ActiveLayer());
+    filtered = combo.filtered;
+    taps = combo.taps;
+    extra = combo.report;
+    extra_actions = combo.actions;
+    keyboard.SetExternalLayers(combo.layers);
 #endif
-    keyboard.Apply(input.Combined());
-#if CONFIG_CUBE_STUDIO_RPC
-    CubeStudioMacroTriggers(keyboard);
-#endif
-#if CONFIG_CUBE_USB_DONGLE_OUTPUT
-#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
-    const auto positions = input.Combined();
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT && CONFIG_CUBE_BLE_DONGLE_OUTPUT
     bool neutral = true;
-    for (auto byte : positions)
+    for (auto byte : physical)
         neutral &= byte == 0;
     CubeDualSetNeutral(neutral);
-    CubeDualSubmit({keyboard.Report(), keyboard.MediaReport()}, keyboard.Actions());
+#endif
+    auto publish = [&](const cube_dongle::SplitState::Snapshot& snapshot, uint16_t actions) {
+        (void)actions;
+        keyboard.Apply(snapshot);
+#if CONFIG_CUBE_STUDIO_RPC
+        CubeStudioMacroTriggers(keyboard);
+#endif
+        cube_dongle::ReportFrame report{keyboard.Report(), keyboard.MediaReport()};
+#if CONFIG_CUBE_STUDIO_RPC
+        report = cube_dongle::studio::MergeReports(report, extra);
+#endif
+        keyboard_output = report;
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+        CubeDualSubmit(report, keyboard.Actions() | actions);
 #else
-    CubeUsbSubmit({keyboard.Report(), keyboard.MediaReport()});
-    if (keyboard.Actions())
-        ESP_LOGW(kTag, "Host BLE profile command unsupported by USB-only candidate: %u",
-                 keyboard.Actions());
+        CubeUsbSubmit(report);
+        if (keyboard.Actions())
+            ESP_LOGW(kTag, "Host BLE profile command unsupported by USB-only candidate: %u",
+                     keyboard.Actions());
 #endif
 #endif
+    };
+    bool pulse = false;
+    auto tapped = filtered;
+    for (size_t i = 0; i < taps.size(); ++i) {
+        pulse |= taps[i] != 0;
+        tapped[i] |= taps[i];
+    }
+    if (pulse)
+        publish(tapped, 0);  // Preserve an early ordinary tap as a real down/up pair.
+    publish(filtered, extra_actions);
 }
 ble_npl_callout retry;
 ble_npl_callout telemetry_timer;
@@ -143,7 +175,12 @@ void PublishStatus() {
         right && peers[1].battery_seen >= 0 && now - peers[1].battery_seen < 90000000
             ? peers[1].battery
             : -1;
-    fight.modifiers = cube_dongle::UiModifiers(keyboard.Report()[0]);
+#if CONFIG_CUBE_STUDIO_RPC
+    fight.modifiers =
+        cube_dongle::UiModifiers(CubeStudioCurrentModifiers(keyboard_output.keyboard[0]));
+#else
+    fight.modifiers = cube_dongle::UiModifiers(keyboard_output.keyboard[0]);
+#endif
     KeyboardStatus status;
     status.online = fight.online;
 #if CONFIG_CUBE_STUDIO_RPC
@@ -191,6 +228,9 @@ bool Encrypted(const Peer& peer) {
 void Fail(Peer& peer, const char* reason) {
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
     input.Disconnect(Side(peer));
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioCancelMacros();
+#endif
     peer.typing.Reset();
     peer.battery = -1;
     peer.battery_seen = -1;
@@ -563,6 +603,9 @@ int OnGap(ble_gap_event* event, void* arg) {
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                peer.connection == event->disconnect.conn.conn_handle) {
         input.Disconnect(cookie & 1);
+#if CONFIG_CUBE_STUDIO_RPC
+        CubeStudioCancelMacros();
+#endif
         peer.typing.Reset();
         peer.battery = -1;
         peer.battery_seen = -1;
@@ -754,6 +797,12 @@ void StartCubeSplitBench() {
 }
 
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
+void CubeSplitInputTick() {
+#if CONFIG_CUBE_STUDIO_RPC
+    if (CubeStudioCombosNeedTick())
+        PublishKeyboard();
+#endif
+}
 bool CubeSplitIsKeyboard(const uint8_t* address, uint8_t type) {
     for (const auto& peer : peers)
         if ((peer.configured || peer.learning) && peer.address.type == type &&

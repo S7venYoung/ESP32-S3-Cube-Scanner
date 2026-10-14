@@ -33,3 +33,21 @@ class StudioIntegrationTest(unittest.TestCase):
         self.assertIn('session.epoch != epochs[i]', source)
         self.assertIn('CubeCdcWritePacket(bytes.data(), bytes.size(), sessions[transport].epoch)', source)
         self.assertIn('link_epoch.load() != expected_epoch', usb)
+
+    def test_combo_pipeline_preserves_taps_and_ticks_on_host_thread(self):
+        source = (ROOT / 'main/scanner/cube_studio.cc').read_text()
+        split = (ROOT / 'main/scanner/cube_split_bench.cc').read_text()
+        ble = (ROOT / 'main/scanner/cube_ble_dongle.cc').read_text()
+        self.assertIn('"cormoran__runtime_combo"', source)
+        self.assertIn('"combos_v1"', source)
+        self.assertIn('combo_engine.Neutral()', source)
+        self.assertIn('publish(tapped, 0)', split)
+        self.assertIn('publish(filtered, extra_actions)', split)
+        self.assertIn('CubeStudioCombosNeedTick()', split)
+        self.assertIn('CubeSplitInputTick();', ble)
+
+    def test_development_actions_remain_manual(self):
+        for name in ('build-cube-dual-candidate.yml', 'build-cube-dongle-bench.yml', 'test-cube-dongle.yml'):
+            source = (ROOT / '.github/workflows' / name).read_text()
+            self.assertIn('workflow_dispatch:', source)
+            self.assertNotIn('  push:', source)

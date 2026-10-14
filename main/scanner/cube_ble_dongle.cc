@@ -785,6 +785,7 @@ bool CubeBleHostInit() {
 }
 namespace {
 void OutputTimer(ble_npl_event*) {
+    CubeSplitInputTick();
     CubeDualTick();
     ble_npl_callout_reset(&output_timer, ble_npl_time_ms_to_ticks32(5));
 }

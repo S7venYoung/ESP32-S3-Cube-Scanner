@@ -1,12 +1,17 @@
 #pragma once
 #include <functional>
+#include "../../experimental/cube_dongle/combo_engine.h"
 #include "../../experimental/cube_dongle/report_queue.h"
 #include "../../experimental/cube_dongle/split_state.h"
 void CubeStudioInitialize();
 void CubeStudioRecordPositions(const cube_dongle::SplitState::Snapshot& positions);
 void CubeStudioMacroTriggers(const cube_dongle::KeyboardState<61, 4>& keyboard);
 cube_dongle::ReportFrame CubeStudioMacroOutput(cube_dongle::ReportFrame physical);
+uint8_t CubeStudioCurrentModifiers(uint8_t physical_modifiers);
 void CubeStudioCancelMacros();
+cube_dongle::studio::ComboResult CubeStudioFilterPositions(
+    const cube_dongle::SplitState::Snapshot& raw, size_t layer);
+bool CubeStudioCombosNeedTick();
 void CubeStudioSetActivityHandler(std::function<void(unsigned)> handler);
 void CubeStudioActivityWake();
 void CubeStudioPoll();

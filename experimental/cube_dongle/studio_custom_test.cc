@@ -1,5 +1,6 @@
 #include <cassert>
 #include <iostream>
+#include "runtime_combos.h"
 #include "runtime_macros.h"
 #include "studio_diagnostics.h"
 #include "studio_watchdog.h"
@@ -13,6 +14,8 @@ Bytes Request(uint32_t tag, const Bytes& arguments = {}) {
 int main(int argc, char**) {
     if (argc > 1) {
         RuntimeMacros macros;
+        RuntimeCombos combos;
+        Bytes combo_stored;
         Diagnostics diagnostics;
         WatchdogLog log;
         Rpc session;
@@ -38,6 +41,16 @@ int main(int argc, char**) {
                                       return log.Handle(payload, unlocked,
                                                         [&](const Bytes&) { return !fail; });
                                   }});
+        session.custom.push_back({"cormoran__runtime_combo", "https://example.org/combo",
+                                  [&](const Bytes& payload, bool unlocked) {
+                                      return combos.Handle(payload, unlocked,
+                                                           [&](const Bytes& bytes) {
+                                                               if (fail)
+                                                                   return false;
+                                                               combo_stored = bytes;
+                                                               return true;
+                                                           });
+                                  }});
         std::string line;
         while (std::getline(std::cin, line)) {
             Bytes response;
@@ -48,6 +61,8 @@ int main(int argc, char**) {
             else if (line == "reload") {
                 macros = RuntimeMacros{};
                 macros.Load(stored);
+                combos = RuntimeCombos{};
+                combos.Load(combo_stored);
             } else {
                 Bytes request;
                 if (line.size() <= 8192 && line.size() % 2 == 0) {

@@ -23,7 +23,7 @@ struct Field {
 };
 class Reader {
 public:
-    Reader(const uint8_t* data, size_t size) {
+    Reader(const uint8_t* data, size_t size, std::initializer_list<uint32_t> repeated = {}) {
         if (!data || size > kLimit)
             return;
         size_t at = 0;
@@ -38,7 +38,8 @@ public:
             if (!f.tag)
                 return;
             for (size_t i = 0; i + 1 < count_; ++i)
-                if (fields_[i].tag == f.tag)
+                if (fields_[i].tag == f.tag &&
+                    std::find(repeated.begin(), repeated.end(), f.tag) == repeated.end())
                     return;
             if (f.wire == 0) {
                 if (!Varint(data, size, at, f.value))
@@ -81,6 +82,13 @@ public:
         return true;
     }
     const Field* Operation() const { return count_ == 1 ? &fields_[0] : nullptr; }
+    std::vector<Field> Repeated(uint32_t tag) const {
+        std::vector<Field> result;
+        for (size_t i = 0; i < count_; ++i)
+            if (fields_[i].tag == tag)
+                result.push_back(fields_[i]);
+        return result;
+    }
 
 private:
     static bool Varint(const uint8_t* data, size_t size, size_t& at, uint64_t& value) {
