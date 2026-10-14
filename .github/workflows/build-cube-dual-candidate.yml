@@ -32,7 +32,7 @@ jobs:
           command: bash scripts/build-cube-dual-candidate.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Cube-Dual-Dongle-CANDIDATE-NOT-HARDWARE-VERIFIED
+          name: Cube-Dual-Dongle
           path: |
             build/merged-binary.bin
             build/xingzhi_cube_dual_candidate.bin
