@@ -76,7 +76,11 @@ std::mutex binding_mutex;
 const ble_uuid128_t kIdentity = BLE_UUID128_INIT(0x43, 0x56, 0x50, 0x31, 0x6f, 0x37, 0x4d, 0x91,
                                                  0xa6, 0x2e, 0x88, 0x05, 0xd4, 0x73, 0x9b, 0xc1);
 cube_dongle::SplitState input(cube_dongle::VelvetOwnership());
+#if CONFIG_CUBE_STUDIO_RPC
+cube_dongle::KeyboardState<61, 4> keyboard(cube_dongle::VelvetStudioKeymap());
+#else
 cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
+#endif
 void PublishKeyboard() {
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioRefreshKeymap(keyboard);

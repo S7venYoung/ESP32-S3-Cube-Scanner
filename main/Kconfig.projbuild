@@ -49,7 +49,8 @@ config CUBE_STUDIO_RPC
         Studio core, behavior metadata and keymap editing over CDC/BLE.
         Runtime macros, host BLE management, activity settings, device info,
         watchdog log and remote-position diagnostics use custom RPC handlers.
-        Double-click BOOT unlocks writes for five minutes. Layers remain fixed.
+        Double-click BOOT unlocks writes for five minutes. Up to four dynamic
+        layers with stable IDs and V1 persistent keymap migration are supported.
 
 config CUBE_BLE_DONGLE_OUTPUT
     bool "Experimental Cube computer BLE HID + five profiles"

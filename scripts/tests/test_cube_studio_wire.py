@@ -60,6 +60,7 @@ class StudioWireTest(unittest.TestCase):
         body = getattr(request, subsystem)
         destination = getattr(body, field)
         if isinstance(value, dict):
+            destination.SetInParent()
             for name, val in value.items():
                 setattr(destination, name, val)
         elif field in ('list_custom_subsystems',):
@@ -93,7 +94,7 @@ class StudioWireTest(unittest.TestCase):
         keymap = self.call('keymap', 'get_keymap').keymap.get_keymap
         self.assertEqual([layer.name for layer in keymap.layers], ['BASE', 'NVA', 'SYS'])
         self.assertEqual([len(layer.bindings) for layer in keymap.layers], [61]*3)
-        self.assertEqual(keymap.available_layers, 0)
+        self.assertEqual(keymap.available_layers, 1)
 
     def test_unlock_edit_save_and_reload(self):
         self.assertEqual(self.set_key().meta.simple_error, 1)
@@ -112,6 +113,30 @@ class StudioWireTest(unittest.TestCase):
         self.assertEqual(self.call('keymap', 'save_changes').keymap.save_changes.err, 1)
         self.assertTrue(self.call('keymap', 'check_unsaved_changes').keymap.check_unsaved_changes)
         self.assertTrue(self.call('keymap', 'discard_changes').keymap.discard_changes)
+        self.assertFalse(self.call('keymap', 'check_unsaved_changes').keymap.check_unsaved_changes)
+
+    def test_dynamic_layers_stable_ids_restore_and_restart(self):
+        self.assertEqual(self.call('keymap', 'add_layer', {}).meta.simple_error, 1)
+        self.exchange('unlock')
+        added = self.call('keymap', 'add_layer', {}).keymap.add_layer
+        self.assertEqual(added.WhichOneof('result'), 'ok')
+        self.assertEqual((added.ok.index, added.ok.layer.id), (3, 3))
+        self.assertEqual(len(added.ok.layer.bindings), 61)
+        self.assertEqual(self.call('keymap', 'add_layer', {}).keymap.add_layer.err, 2)
+        props = self.call('keymap', 'set_layer_props', {'layer_id': 3, 'name': 'EXTRA'})
+        self.assertEqual(props.keymap.set_layer_props, 0)
+        moved = self.call('keymap', 'move_layer', {'start_index': 3, 'dest_index': 1}).keymap.move_layer.ok
+        self.assertEqual([layer.id for layer in moved.layers], [0, 3, 1, 2])
+        removed = self.call('keymap', 'remove_layer', {'layer_index': 1}).keymap.remove_layer
+        self.assertEqual(removed.WhichOneof('result'), 'ok')
+        restored = self.call('keymap', 'restore_layer', {'layer_id': 3, 'at_index': 2}).keymap.restore_layer
+        self.assertEqual(restored.ok.name, 'EXTRA')
+        self.call('keymap', 'save_changes')
+        self.exchange('reload')
+        keymap = self.call('keymap', 'get_keymap').keymap.get_keymap
+        self.assertEqual([layer.id for layer in keymap.layers], [0, 1, 3, 2])
+        self.assertEqual(keymap.layers[2].name, 'EXTRA')
+        self.assertEqual(keymap.available_layers, 0)
         self.assertFalse(self.call('keymap', 'check_unsaved_changes').keymap.check_unsaved_changes)
 
     def test_client_manual_lock_still_rejects_writes(self):

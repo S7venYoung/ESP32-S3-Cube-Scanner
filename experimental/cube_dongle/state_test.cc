@@ -150,6 +150,29 @@ int main() {
     real_keyboard.Apply({});
     assert(real_keyboard.Report() == KeyboardReport{} && real_keyboard.MediaReport() == 0);
     assert(real_keyboard.ActiveLayer() == 0);
+    KeyboardState<3, 4>::Keymap ordered_map{};
+    for (size_t layer = 1; layer < 4; ++layer)
+        for (auto& binding : ordered_map[layer])
+            binding = {Kind::Transparent, 0, 0};
+    ordered_map[0][0] = {Kind::Key, 4, 0};
+    ordered_map[0][1] = {Kind::MomentaryLayer, 1, 0};
+    ordered_map[0][2] = {Kind::MomentaryLayer, 2, 0};
+    ordered_map[1][0] = {Kind::Key, 5, 0};
+    ordered_map[2][0] = {Kind::Key, 6, 0};
+    KeyboardState<3, 4> ordered(ordered_map);
+    SplitState::Snapshot ordered_input{};
+    ordered_input[0] = 7;
+    ordered.Apply(ordered_input);
+    assert(ordered.Report()[2] == 6);
+    assert(ordered.SetLayerOrder({0, 2, 1, 3}, 3));
+    ordered.Apply(ordered_input);
+    assert(ordered.Report()[2] == 6);  // Held binding remains latched across reorder.
+    ordered_input[0] = 6;
+    ordered.Apply(ordered_input);
+    ordered_input[0] = 7;
+    ordered.Apply(ordered_input);
+    assert(ordered.Report()[2] == 5 && ordered.ActiveLayer() == 1);
+    assert(!ordered.SetLayerOrder({0, 0, 1, 3}, 3));
 
     ReportQueue<2> queue;
     ReportFrame a, b;

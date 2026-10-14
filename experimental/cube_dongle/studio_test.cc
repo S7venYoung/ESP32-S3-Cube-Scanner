@@ -89,6 +89,14 @@ int main(int argc, char**) {
     Model loaded;
     assert(loaded.Load(record));
     assert(loaded.Export() == record);
+    Bytes legacy{'C', 'V', 'S', 1};
+    legacy.insert(legacy.end(), record.begin() + 9, record.begin() + 9 + 3 * (17 + 61 * 4));
+    const uint32_t legacy_hash = Model::Hash(legacy.data(), legacy.size());
+    for (unsigned i = 0; i < 4; ++i)
+        legacy.push_back(legacy_hash >> (i * 8));
+    Model migrated;
+    assert(migrated.Load(legacy) && migrated.count == 3);
+    assert(migrated.names[0] == "BASE" && migrated.map[0][26].value == 4);
     auto corrupt = record;
     corrupt[13] ^= 1;
     assert(!loaded.Load(corrupt));
@@ -102,7 +110,7 @@ int main(int argc, char**) {
         }
     Binding invalid;
     assert(!BindingFromWire(2, 0xffffffffffffffffULL, 0, invalid));
-    assert(!BindingFromWire(4, 3, 0, invalid));
+    assert(!BindingFromWire(4, 4, 0, invalid));
     assert(!BindingFromWire(10, 1, 0, invalid));
     Bytes binding, edit;
     Signed(binding, 1, kKp);
@@ -140,7 +148,7 @@ int main(int argc, char**) {
     assert(failed_reader.valid && rpc.Dirty());
     rpc.Handle(Request(5, 5), save);
     assert(rpc.model.names[1] == "NVA" && !rpc.Dirty());
-    KeyboardState<61, 3> keyboard(VelvetKeymap());
+    KeyboardState<61, 4> keyboard(VelvetStudioKeymap());
     SplitState::Snapshot snapshot{};
     snapshot[26 / 8] = 1u << (26 % 8);
     keyboard.Apply(snapshot);

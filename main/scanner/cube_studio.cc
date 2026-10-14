@@ -192,8 +192,10 @@ struct Session {
 std::array<Session, 2> sessions;
 std::once_flag initialize_once;
 std::mutex cache_mutex;
-cube_dongle::KeyboardState<61, 3>::Keymap live_map = cube_dongle::VelvetKeymap();
-std::array<std::string, 3> live_names{{"BASE", "NVA", "SYS"}};
+cube_dongle::KeyboardState<61, 4>::Keymap live_map = cube_dongle::VelvetStudioKeymap();
+std::array<std::string, 4> live_names{{"BASE", "NVA", "SYS", "Layer4"}};
+std::array<size_t, 4> live_order{{0, 1, 2, 3}};
+size_t live_count = 3;
 std::atomic<bool> unlock_request{false};
 bool Save(const wire::Bytes& data) {
     nvs_handle_t handle;
@@ -209,6 +211,8 @@ void UpdateCache() {
     std::lock_guard<std::mutex> lock(cache_mutex);
     live_map = rpc.model.map;
     live_names = rpc.model.names;
+    live_order = rpc.model.order;
+    live_count = rpc.model.count;
 }
 void Send(size_t transport, const wire::Bytes& payload) {
     const auto bytes = wire::Frame(payload);
@@ -343,7 +347,7 @@ void CubeStudioRecordPositions(const cube_dongle::SplitState::Snapshot& position
     std::lock_guard<std::mutex> lock(diagnostics_mutex);
     diagnostics.Sample(positions, uint32_t(esp_timer_get_time() / 1000));
 }
-void CubeStudioMacroTriggers(const cube_dongle::KeyboardState<61, 3>& keyboard) {
+void CubeStudioMacroTriggers(const cube_dongle::KeyboardState<61, 4>& keyboard) {
     for (size_t p = 0; p < macro_keys.size(); ++p) {
         const auto binding = keyboard.PressedBinding(p);
         const bool pressed = binding.kind == cube_dongle::Kind::RuntimeMacro;
@@ -439,12 +443,13 @@ bool CubeStudioUnlockUsb() {
     unlock_request = true;
     return true;
 }
-void CubeStudioRefreshKeymap(cube_dongle::KeyboardState<61, 3>& keyboard) {
+void CubeStudioRefreshKeymap(cube_dongle::KeyboardState<61, 4>& keyboard) {
     std::lock_guard<std::mutex> lock(cache_mutex);
     keyboard.SetKeymap(live_map);
+    keyboard.SetLayerOrder(live_order, live_count);
 }
 void CubeStudioLayerName(size_t layer, char* name, size_t capacity) {
     std::lock_guard<std::mutex> lock(cache_mutex);
     if (name && capacity)
-        std::snprintf(name, capacity, "%s", layer < 3 ? live_names[layer].c_str() : "?");
+        std::snprintf(name, capacity, "%s", layer < 4 ? live_names[layer].c_str() : "?");
 }

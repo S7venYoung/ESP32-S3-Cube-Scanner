@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -236,7 +237,7 @@ inline bool BindingFromWire(uint64_t encoded_id, uint64_t p1, uint64_t p2, Bindi
             out = {Kind::Media, uint16_t(usage == 0xe9 ? 1 : usage == 0xea ? 2 : 4), 0};
             return true;
         }
-    } else if (id == kMo && p1 < 3 && !p2) {
+    } else if (id == kMo && p1 < 4 && !p2) {
         out = {Kind::MomentaryLayer, uint16_t(p1), 0};
         return true;
     } else if (id == kTransparent && !p1 && !p2) {
@@ -268,19 +269,26 @@ inline Bytes EncodeBinding(const Binding& b) {
     return out;
 }
 struct Model {
-    KeyboardState<61, 3>::Keymap map = VelvetKeymap();
-    std::array<std::string, 3> names{{"BASE", "NVA", "SYS"}};
+    KeyboardState<61, 4>::Keymap map = VelvetStudioKeymap();
+    std::array<std::string, 4> names{{"BASE", "NVA", "SYS", "Layer4"}};
+    std::array<size_t, 4> order{{0, 1, 2, 3}};
+    size_t count = 3;
+    bool Active(size_t id) const {
+        return std::find(order.begin(), order.begin() + count, id) != order.begin() + count;
+    }
+    Bytes Layer(size_t id) const {
+        Bytes layer;
+        Number(layer, 1, id);
+        Text(layer, 2, names[id]);
+        for (const auto& binding : map[id])
+            Message(layer, 3, EncodeBinding(binding));
+        return layer;
+    }
     Bytes Keymap() const {
         Bytes out;
-        for (size_t l = 0; l < 3; ++l) {
-            Bytes layer;
-            Number(layer, 1, l);
-            Text(layer, 2, names[l]);
-            for (const auto& b : map[l])
-                Message(layer, 3, EncodeBinding(b));
-            Message(out, 1, layer);
-        }
-        Number(out, 2, 0);
+        for (size_t i = 0; i < count; ++i)
+            Message(out, 1, Layer(order[i]));
+        Number(out, 2, 4 - count);
         Number(out, 3, 16);
         return out;
     }
@@ -294,8 +302,11 @@ struct Model {
         for (const auto& name : names)
             if (!ValidName(name))
                 return {};
-        Bytes out{'C', 'V', 'S', 1};
-        for (size_t l = 0; l < 3; ++l) {
+        Bytes out{'C', 'V', 'S', 2};
+        out.push_back(count);
+        for (const auto id : order)
+            out.push_back(id);
+        for (size_t l = 0; l < 4; ++l) {
             std::array<uint8_t, 17> name{};
             std::memcpy(name.data(), names[l].data(), names[l].size());
             out.insert(out.end(), name.begin(), name.end());
@@ -312,7 +323,11 @@ struct Model {
         return out;
     }
     bool Load(const Bytes& data) {
-        if (data.size() != 4 + 3 * (17 + 61 * 4) + 4 || std::memcmp(data.data(), "CVS\1", 4))
+        const bool old =
+            data.size() == 4 + 3 * (17 + 61 * 4) + 4 && !std::memcmp(data.data(), "CVS\1", 4);
+        const bool current =
+            data.size() == 9 + 4 * (17 + 61 * 4) + 4 && !std::memcmp(data.data(), "CVS\2", 4);
+        if (!old && !current)
             return false;
         uint32_t expected = 0;
         for (unsigned i = 0; i < 4; ++i)
@@ -321,7 +336,19 @@ struct Model {
             return false;
         Model next;
         size_t at = 4;
-        for (size_t l = 0; l < 3; ++l) {
+        if (current) {
+            next.count = data[at++];
+            if (!next.count || next.count > 4)
+                return false;
+            std::array<bool, 4> seen{};
+            for (auto& id : next.order) {
+                id = data[at++];
+                if (id >= 4 || seen[id])
+                    return false;
+                seen[id] = true;
+            }
+        }
+        for (size_t l = 0; l < (old ? 3 : 4); ++l) {
             const auto* name = reinterpret_cast<const char*>(data.data() + at);
             if (name[16] || !ValidName(std::string(name, strnlen(name, 17))))
                 return false;
@@ -522,7 +549,7 @@ public:
                         return Error(id, 3);
                     uint64_t layer = edit.Value(1), position = edit.Value(2);
                     const auto* bf = edit.Get(3);
-                    if (layer >= 3 || position >= 61)
+                    if (layer >= 4 || !model.Active(layer) || position >= 61)
                         Number(reply, 2, 1);
                     else if (!bf || bf->wire != 2)
                         return Error(id, 3);
@@ -558,13 +585,70 @@ public:
                     else
                         Number(result, 2, 2);
                     Message(reply, 7, result);
+                } else if (op->tag >= 8 && op->tag <= 11 && op->wire == 2) {
+                    Reader edit(op->data, op->size);
+                    if (!edit.valid || !edit.Numbers({1, 2}))
+                        return Error(id, 3);
+                    Bytes result;
+                    const auto source = edit.Value(1), destination = edit.Value(2);
+                    if (op->tag == 8) {
+                        if (source >= model.count || destination >= model.count)
+                            Number(result, 2, source >= model.count ? 2 : 3);
+                        else {
+                            if (source < destination)
+                                std::rotate(model.order.begin() + source,
+                                            model.order.begin() + source + 1,
+                                            model.order.begin() + destination + 1);
+                            else if (source > destination)
+                                std::rotate(model.order.begin() + destination,
+                                            model.order.begin() + source,
+                                            model.order.begin() + source + 1);
+                            Message(result, 1, model.Keymap());
+                        }
+                    } else if (op->tag == 9) {
+                        if (model.count == 4)
+                            Number(result, 2, 2);
+                        else {
+                            const auto layer_id = model.order[model.count];
+                            model.names[layer_id] = "Layer" + std::to_string(layer_id + 1);
+                            for (auto& binding : model.map[layer_id])
+                                binding = {Kind::Transparent, 0, 0};
+                            Bytes details;
+                            Number(details, 1, model.count++);
+                            Message(details, 2, model.Layer(layer_id));
+                            Message(result, 1, details);
+                        }
+                    } else if (op->tag == 10) {
+                        if (source >= model.count || model.count == 1)
+                            Number(result, 2, 2);
+                        else {
+                            std::rotate(model.order.begin() + source,
+                                        model.order.begin() + source + 1,
+                                        model.order.begin() + model.count);
+                            --model.count;
+                            Message(result, 1, {});
+                        }
+                    } else {
+                        if (source >= 4 || model.Active(source))
+                            Number(result, 2, 2);
+                        else if (destination > model.count || model.count == 4)
+                            Number(result, 2, 3);
+                        else {
+                            const auto position = std::find(model.order.begin() + model.count,
+                                                            model.order.end(), source);
+                            std::rotate(model.order.begin() + destination, position, position + 1);
+                            ++model.count;
+                            Message(result, 1, model.Layer(source));
+                        }
+                    }
+                    Message(reply, op->tag, result);
                 } else if (op->tag == 12 && op->wire == 2) {
                     Reader props(op->data, op->size);
                     if (!props.valid || !props.Numbers({1}))
                         return Error(id, 3);
                     const auto* name = props.Get(2);
                     uint64_t layer = props.Value(1);
-                    if (layer >= 3)
+                    if (layer >= 4 || !model.Active(layer))
                         Number(reply, 12, 2);
                     else if (!name || name->wire != 2 || name->size > 16)
                         Number(reply, 12, 1);

@@ -63,9 +63,25 @@ class KeyboardState {
 public:
     static_assert(Positions <= 128 && Layers > 0 && Layers <= 16);
     using Keymap = std::array<std::array<Binding, Positions>, Layers>;
-    explicit KeyboardState(const Keymap& keymap) : keymap_(keymap) {}
+    explicit KeyboardState(const Keymap& keymap) : keymap_(keymap) {
+        for (size_t i = 0; i < Layers; ++i)
+            order_[i] = i;
+    }
     // Replace future bindings on the host thread; held keys keep their old binding.
     void SetKeymap(const Keymap& keymap) { keymap_ = keymap; }
+    bool SetLayerOrder(const std::array<size_t, Layers>& order, size_t count) {
+        if (!count || count > Layers)
+            return false;
+        std::array<bool, Layers> seen{};
+        for (size_t i = 0; i < count; ++i) {
+            if (order[i] >= Layers || seen[order[i]])
+                return false;
+            seen[order[i]] = true;
+        }
+        order_ = order;
+        layer_count_ = count;
+        return true;
+    }
 
     // Process releases first. Latch press-time bindings so changing layers never
     // changes which usage is released. Simultaneous layer presses resolve first.
@@ -130,11 +146,12 @@ public:
         return position < Positions && pressed_[position] ? latched_[position] : Binding{};
     }
     size_t ActiveLayer() const {
-        size_t layer = 0;
-        for (size_t p = 0; p < Positions; ++p)
-            if (pressed_[p] && latched_[p].kind == Kind::MomentaryLayer &&
-                latched_[p].value < Layers && latched_[p].value > layer)
-                layer = latched_[p].value;
+        size_t layer = order_[0];
+        for (size_t i = 1; i < layer_count_; ++i)
+            for (size_t p = 0; p < Positions; ++p)
+                if (pressed_[p] && latched_[p].kind == Kind::MomentaryLayer &&
+                    latched_[p].value == order_[i])
+                    layer = order_[i];
         return layer;
     }
 
@@ -144,13 +161,14 @@ private:
     }
     Binding Resolve(size_t position) const {
         std::array<bool, Layers> active{};
-        active[0] = true;
+        active[order_[0]] = true;
         for (size_t p = 0; p < Positions; ++p) {
             const auto& b = latched_[p];
             if (pressed_[p] && b.kind == Kind::MomentaryLayer && b.value < Layers)
                 active[b.value] = true;
         }
-        for (size_t layer = Layers; layer-- > 0;) {
+        for (size_t index = layer_count_; index-- > 0;) {
+            const auto layer = order_[index];
             if (active[layer] && keymap_[layer][position].kind != Kind::Transparent)
                 return keymap_[layer][position];
         }
@@ -163,6 +181,8 @@ private:
             actions_ |= 1u << binding.value;
     }
     Keymap keymap_;
+    std::array<size_t, Layers> order_{};
+    size_t layer_count_ = Layers;
     std::array<bool, Positions> pressed_{};
     std::array<Binding, Positions> latched_{};
     uint16_t actions_ = 0;

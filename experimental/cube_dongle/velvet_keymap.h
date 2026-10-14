@@ -118,4 +118,13 @@ inline KeyboardState<61, 3>::Keymap VelvetKeymap() {
                  {Kind::HostAction, 6, 0},
              }}}};
 }
+inline KeyboardState<61, 4>::Keymap VelvetStudioKeymap() {
+    KeyboardState<61, 4>::Keymap result{};
+    const auto original = VelvetKeymap();
+    for (size_t layer = 0; layer < 3; ++layer)
+        result[layer] = original[layer];
+    for (auto& binding : result[3])
+        binding = {Kind::Transparent, 0, 0};
+    return result;
+}
 }  // namespace cube_dongle
