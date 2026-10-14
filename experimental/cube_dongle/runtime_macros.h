@@ -293,6 +293,11 @@ public:
     bool Start(const Macro& macro, uint32_t tap_ms, uint32_t now) {
         if (active_ || macro.name.empty() || macro.steps.empty())
             return false;
+        if (macro.steps.size() > 64 || tap_ms < 5 || tap_ms > 5000)
+            return false;
+        for (const auto& step : macro.steps)
+            if (!MacroModel::Step(step))
+                return false;
         macro_ = macro;
         tap_ms_ = tap_ms;
         active_ = true;

@@ -1,4 +1,6 @@
 #include <cassert>
+#include <iostream>
+#include "runtime_macros.h"
 #include "studio_diagnostics.h"
 #include "studio_watchdog.h"
 
@@ -8,7 +10,60 @@ Bytes Request(uint32_t tag, const Bytes& arguments = {}) {
     Message(result, tag, arguments);
     return result;
 }
-int main() {
+int main(int argc, char**) {
+    if (argc > 1) {
+        RuntimeMacros macros;
+        Diagnostics diagnostics;
+        WatchdogLog log;
+        Rpc session;
+        Bytes stored;
+        bool fail = false;
+        log.Boot(16);
+        session.custom.push_back({"cormoran__runtime_macro", "https://example.org/macro",
+                                  [&](const Bytes& payload, bool unlocked) {
+                                      return macros.Handle(payload, unlocked,
+                                                           [&](const Bytes& bytes) {
+                                                               if (fail)
+                                                                   return false;
+                                                               stored = bytes;
+                                                               return true;
+                                                           });
+                                  }});
+        session.custom.push_back({"cormoran__kscan_diagnostics", "https://example.org/diagnostics",
+                                  [&](const Bytes& payload, bool unlocked) {
+                                      return diagnostics.Handle(payload, unlocked, 123);
+                                  }});
+        session.custom.push_back({"cormoran__watchdog", "https://example.org/watchdog",
+                                  [&](const Bytes& payload, bool unlocked) {
+                                      return log.Handle(payload, unlocked,
+                                                        [&](const Bytes&) { return !fail; });
+                                  }});
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            Bytes response;
+            if (line == "unlock")
+                response = session.LockState(true);
+            else if (line == "fail-save")
+                fail = true;
+            else if (line == "reload") {
+                macros = RuntimeMacros{};
+                macros.Load(stored);
+            } else {
+                Bytes request;
+                if (line.size() <= 8192 && line.size() % 2 == 0) {
+                    for (size_t i = 0; i < line.size(); i += 2)
+                        request.push_back(std::stoul(line.substr(i, 2), nullptr, 16));
+                    response = session.Handle(request, [](const Bytes&) { return false; });
+                }
+            }
+            for (uint8_t b : Frame(response)) {
+                const char* hex = "0123456789abcdef";
+                std::cout << hex[b >> 4] << hex[b & 15];
+            }
+            std::cout << std::endl;
+        }
+        return 0;
+    }
     Rpc rpc;
     rpc.custom.push_back({"test__secured", "https://example.org/", [](const Bytes&, bool unlocked) {
                               return unlocked ? Request(2) : CustomError("locked");

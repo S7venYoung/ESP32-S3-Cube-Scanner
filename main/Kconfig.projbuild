@@ -42,13 +42,14 @@ config CUBE_USB_DONGLE_OUTPUT
         and advanced ZMK behaviors are not implemented by this candidate.
 
 config CUBE_STUDIO_RPC
-    bool "Cube USB ZMK Studio / DYA keymap configuration"
+    bool "Cube USB/BLE Studio / DYA configuration"
     depends on CUBE_USB_DONGLE_OUTPUT && CUBE_BLE_DONGLE_OUTPUT
     default n
     help
-        Standard Studio core, behavior metadata and existing keymap editing
-        over CDC. Double-click BOOT unlocks writes for five minutes.
-        Fixed three layers; advanced custom DYA modules are not advertised.
+        Studio core, behavior metadata and keymap editing over CDC/BLE.
+        Runtime macros, host BLE management, activity settings, device info,
+        watchdog log and remote-position diagnostics use custom RPC handlers.
+        Double-click BOOT unlocks writes for five minutes. Layers remain fixed.
 
 config CUBE_BLE_DONGLE_OUTPUT
     bool "Experimental Cube computer BLE HID + five profiles"

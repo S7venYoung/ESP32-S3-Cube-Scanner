@@ -161,6 +161,10 @@ wire::Bytes DeviceInfo(const wire::Bytes& payload, bool) {
     wire::Text(build, 7, app->idf_ver);
     wire::Text(build, 8, std::string(app->date) + " " + app->time);
     wire::Text(build, 9, "nologo-xingzhi-cube-1.54tft-wifi");
+    char build_hash[65];
+    for (size_t i = 0; i < 32; ++i)
+        std::snprintf(build_hash + i * 2, 3, "%02x", app->app_elf_sha256[i]);
+    wire::Text(build, 10, build_hash);
     wire::Text(hardware, 1, rpc.serial);
     wire::Number(hardware, 2, esp_reset_reason());
     uint32_t flash_size = 0;
