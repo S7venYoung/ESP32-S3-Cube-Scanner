@@ -7,6 +7,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <soc/rtc_cntl_reg.h>
+#include <soc/system_reg.h>
 #include <soc/usb_serial_jtag_reg.h>
 #include <tinyusb.h>
 #include <tinyusb_cdc_acm.h>
@@ -96,6 +97,8 @@ void ReleaseLocked() {
 }
 std::atomic<bool> download_requested{false};
 void DownloadShutdown() {
+    // esp_restart does not reset USB OTG on S3; hold it reset during PHY handoff.
+    SET_PERI_REG_MASK(SYSTEM_PERIP_RST_EN0_REG, SYSTEM_USB_RST);
     // Restore the internal PHY to hardware Serial/JTAG, not the application's OTG CDC.
     CLEAR_PERI_REG_MASK(RTC_CNTL_USB_CONF_REG, RTC_CNTL_SW_HW_USB_PHY_SEL |
                                                    RTC_CNTL_SW_USB_PHY_SEL |
