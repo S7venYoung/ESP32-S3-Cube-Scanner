@@ -55,18 +55,16 @@ void ScanAgain(ble_npl_event*) {
 void ExpireModifiers(int64_t now) {
     {
         std::lock_guard<std::mutex> lock(fight_mutex);
-        if (fight_seen_us >= 0 && now - fight_seen_us > 3000000) {
-            fight_seen_us = -1;
-            // Retain the last sequence only, so duplicate advertisements
-            // cannot resurrect an expired WPM sample. GetFightTelemetry
-            // still returns an unknown/offline sample after this timeout.
+        if (fight_seen_us >= 0 && now - fight_seen_us > kFightInputLeaseUs &&
+            modifier_seen_us >= 0 && modifier_address == fight_address) {
+            // Keep presence/battery and sequence; only release transient input.
             modifier_seen_us = -1;
             modifier_address.clear();
             modifier_state = 0;
             Application::GetInstance().Schedule([]() { display->SetMacModifierState(0); });
         }
     }
-    if (modifier_seen_us >= 0 && now - modifier_seen_us > 60000000) {
+    if (modifier_seen_us >= 0 && now - modifier_seen_us > kFightInputLeaseUs) {
         modifier_seen_us = -1;
         modifier_address.clear();
         modifier_state = 0;
@@ -89,7 +87,7 @@ void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
             bool accepted = false;
             {
                 std::lock_guard<std::mutex> lock(fight_mutex);
-                const bool live = fight_seen_us >= 0 && now - fight_seen_us <= 3000000;
+                const bool live = fight_seen_us >= 0 && now - fight_seen_us <= kFightInputLeaseUs;
                 const bool same_source =
                     fight_address == address && fight_data.keyboard_id == fight.keyboard_id;
                 if ((fight_address.empty() || !live || same_source) &&
@@ -123,7 +121,7 @@ void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
         bool fight_active;
         {
             std::lock_guard<std::mutex> lock(fight_mutex);
-            fight_active = fight_seen_us >= 0 && now - fight_seen_us <= 3000000;
+            fight_active = fight_seen_us >= 0 && now - fight_seen_us <= kFightInputLeaseUs;
         }
         if (!fight_active && (modifier_address.empty() || modifier_address == address) &&
             data[pos] == 0xff && ParseProspectorModifiers(data + pos + 1, length - 1, mods)) {
@@ -249,9 +247,7 @@ void HostTask(void*) {
 
 FightTelemetry GetFightTelemetry() {
     std::lock_guard<std::mutex> lock(fight_mutex);
-    if (fight_seen_us < 0 || esp_timer_get_time() - fight_seen_us > 3000000)
-        return {};
-    return fight_data;
+    return FightSnapshotAt(fight_data, fight_seen_us, esp_timer_get_time());
 }
 
 KeyboardStatus GetKeyboardStatus() {
@@ -259,7 +255,10 @@ KeyboardStatus GetKeyboardStatus() {
     if (keyboard_seen_us < 0 ||
         esp_timer_get_time() - keyboard_seen_us > scanner_policy::kStatusLeaseUs)
         return {};
-    return keyboard_data;
+    auto snapshot = keyboard_data;
+    if (esp_timer_get_time() - keyboard_seen_us > kFightInputLeaseUs)
+        snapshot.modifiers = 0;
+    return snapshot;
 }
 
 namespace {

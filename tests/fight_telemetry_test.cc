@@ -59,4 +59,33 @@ int main() {
     left.Step(6100, 0, true);
     right.Step(6100, 0, true);
     assert(left.pose == 0 && right.pose == 0);
+    // A radio gap must not turn keyboard presence/battery into unknown.
+    FightTelemetry last;
+    last.online = true;
+    last.sequence = 42;
+    last.left_wpm = 100;
+    last.right_wpm = 70;
+    last.left_battery = 0;
+    last.right_battery = 79;
+    last.modifiers = 4;
+    constexpr int64_t seen = 1000000;
+    auto sample = FightSnapshotAt(last, seen, seen + kFightInputLeaseUs);
+    assert(sample.online && sample.left_wpm == 100 && sample.modifiers == 4);
+    sample = FightSnapshotAt(last, seen, seen + kFightInputLeaseUs + 1);
+    assert(sample.online && sample.left_battery == 0 && sample.right_battery == 79);
+    assert(sample.left_wpm == 0 && sample.right_wpm == 0 && sample.modifiers == 0);
+    left.Step(6200, sample.left_wpm, sample.online);
+    right.Step(6200, sample.right_wpm, sample.online);
+    assert(left.pose == 0 && right.pose == 0);
+    assert(sample.sequence == 42 && !FightFrameNewer(last, sample, false));
+    assert(last.left_wpm == 100 && last.modifiers == 4);  // Snapshot is not destructive.
+    assert(FightSnapshotAt(last, seen, seen + kFightPresenceLeaseUs).online);
+    sample = FightSnapshotAt(last, seen, seen + kFightPresenceLeaseUs + 1);
+    assert(!sample.online && sample.left_battery == -1 && sample.right_battery == -1);
+    assert(!FightSnapshotAt(last, -1, seen).online);
+    assert(!FightSnapshotAt(last, seen, seen - 1).online);
+    // A genuinely new frame resumes input immediately.
+    last.sequence++;
+    sample = FightSnapshotAt(last, seen + 5000000, seen + 5000000);
+    assert(sample.online && sample.left_wpm == 100 && sample.modifiers == 4);
 }

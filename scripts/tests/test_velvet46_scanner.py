@@ -42,3 +42,11 @@ class Velvet46ScannerTest(unittest.TestCase):
         self.assertIn('speeds[i]', source)
         scan = (ROOT / 'main/scanner/zmk_scanner.cc').read_text()
         self.assertIn('FightFrameNewer(fight_data, fight, live)', scan)
+
+    def test_radio_gap_keeps_presence_not_input(self):
+        source = (ROOT / 'main/scanner/zmk_scanner.cc').read_text()
+        self.assertIn('FightSnapshotAt(fight_data, fight_seen_us,', source)
+        expire = source[source.index('void ExpireModifiers'):source.index('void ReceiveModifiers')]
+        self.assertNotIn('fight_seen_us = -1', expire)
+        self.assertIn('kFightInputLeaseUs', expire)
+        self.assertNotIn('60000000', expire)

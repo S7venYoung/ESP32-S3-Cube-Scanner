@@ -42,3 +42,18 @@ inline bool FightFrameNewer(const FightTelemetry& previous, const FightTelemetry
     return delta != 0 && (!previous_live || delta < 0x8000);
 }
 FightTelemetry GetFightTelemetry();
+
+// Presence/battery tolerate missed radio windows; input must never stay held.
+constexpr int64_t kFightInputLeaseUs = 3000000;
+constexpr int64_t kFightPresenceLeaseUs = 90000000;
+inline FightTelemetry FightSnapshotAt(const FightTelemetry& last, int64_t seen, int64_t now) {
+    if (seen < 0 || now < seen || now - seen > kFightPresenceLeaseUs)
+        return {};
+    auto snapshot = last;
+    if (now - seen > kFightInputLeaseUs) {
+        snapshot.left_wpm = 0;
+        snapshot.right_wpm = 0;
+        snapshot.modifiers = 0;
+    }
+    return snapshot;
+}

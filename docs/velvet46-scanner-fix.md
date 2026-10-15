@@ -17,6 +17,19 @@
 纯 C++ ASAN/UBSAN 测试覆盖精确名称、空名称、同地址续期、不同地址隔离、改名撤销、超时、非法状态数据和有界退避；SDK 构建验证编译，不代替实机收包验证。异常发热时保持断电，不为复现持续通电。
 # Codex and Macintosh keyboard telemetry
 
+## Short radio-gap handling
+
+Fight telemetry now has separate 3-second input and 90-second presence leases.
+After 3 seconds without a new accepted sequence, the snapshot reports zero hand
+WPM and released modifiers while retaining last-known keyboard batteries. This
+returns fighters to idle without flashing the battery gauges to unknown. After
+90 seconds without a new frame, the snapshot becomes offline/unknown. Repeated
+or rejected sequence numbers still do not renew either lease. Canonical status
+modifiers also release after 3 seconds, instead of remaining pressed for the
+90-second status lease. No scanning duty-cycle increase or keyboard change is
+needed. Host tests cover expiry boundaries, recovery and zero-percent battery;
+radio and display behaviour still require hardware validation.
+
 Both dashboards now refresh their layer, WPM and left/right battery widgets from
 real scanner telemetry, including immediately after a theme switch. Macintosh
 also refreshes the keyboard host transport, Bluetooth profile (1-based) and BLE
