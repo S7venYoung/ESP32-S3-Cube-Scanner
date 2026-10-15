@@ -1,3 +1,4 @@
-2026-10-15 DYA integration batch
-Source: 7f8ee114090390df650d5fa0717db2f49bf1594c
-Build only Cube USB+BLE; preserve XiaoZhi and themes.
+2026-10-15 DYA stability repair batch
+Reduce nested stack use; yield on USB errors and continuous input.
+Bound failed notification batches and expose read-only diagnostics.
+Build Cube USB+BLE only. Do not build keyboard halves or flash hardware.

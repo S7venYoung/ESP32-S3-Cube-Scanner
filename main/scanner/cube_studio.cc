@@ -227,6 +227,7 @@ wire::Bytes DeviceInfo(const wire::Bytes& payload, bool) {
 struct Session {
     wire::Framer framer;
     bool connected = false, unlocked = false, used = false, stream = false;
+    bool tx_failed = false;
     int64_t until = 0, last_byte = 0;
     uint32_t epoch = 0;
 };
@@ -256,12 +257,18 @@ void UpdateCache() {
     live_count = rpc.model.count;
 }
 void Send(size_t transport, const wire::Bytes& payload) {
+    // One stalled recipient must not block once per notification and exceed
+    // the task watchdog. A fresh request (or connection epoch) permits retry.
+    if (sessions[transport].tx_failed)
+        return;
     const auto bytes = wire::Frame(payload);
     const bool sent =
         transport == 0 ? CubeCdcWritePacket(bytes.data(), bytes.size(), sessions[transport].epoch)
                        : CubeBleStudioWrite(bytes.data(), bytes.size(), sessions[transport].epoch);
-    if (!sent)
+    if (!sent) {
+        sessions[transport].tx_failed = true;
         ESP_LOGW("CubeStudio", "Response interrupted; reconnect Studio");
+    }
 }
 struct RelayEvent {
     unsigned source;
@@ -545,6 +552,9 @@ bool Feed(size_t transport, uint8_t byte, uint32_t epoch) {
     return session.framer.Feed(byte, [transport](const wire::Bytes& payload) {
         auto& session = sessions[transport];
         session.used = true;
+        session.tx_failed = false;
+        if (watchdog_subscribed)
+            esp_task_wdt_reset();
         active_transport = transport;
         rpc.LockState(session.unlocked && esp_timer_get_time() < session.until);
         const bool before_dirty = rpc.Dirty(), before_unlock = rpc.Unlocked();

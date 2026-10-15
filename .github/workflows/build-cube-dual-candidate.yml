@@ -43,4 +43,6 @@ jobs:
             build/DUAL-CANDIDATE-NOT-FINAL.md
             build/AUTO-BINDING.md
             build/DYA-STUDIO.md
+            build/DYA-STABILITY-FIX.md
+            build/esp-idf/main/**/*.su
           if-no-files-found: error

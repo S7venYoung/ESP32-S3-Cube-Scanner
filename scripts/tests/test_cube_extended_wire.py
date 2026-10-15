@@ -51,6 +51,7 @@ class ExtendedWireTest(unittest.TestCase):
         p = self.modules[0]
         response = self.call(0, p.Request(get_snapshot=True))
         self.assertEqual(response.snapshot.behavior_count, 8)
+        self.assertEqual(response.snapshot.available_layers, 4)
         response = self.call(0, p.Request(get_physical_layout=p.GetPhysicalLayoutRequest(layout_index=0)))
         self.assertEqual(len(response.get_physical_layout.layout.keys), 61)
         response = self.call(0, p.Request(list_behaviors=p.ListBehaviorsRequest(details=2, include_alias=True)))

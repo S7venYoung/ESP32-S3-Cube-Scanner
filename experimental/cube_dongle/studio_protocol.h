@@ -32,8 +32,7 @@ public:
             if (!Varint(data, size, at, key) || !key || key > UINT32_MAX || count_ == 128)
                 return;
             const auto tag = key >> 3;
-            if (count_ >= fields_.size() &&
-                std::find(repeated.begin(), repeated.end(), tag) == repeated.end())
+            if (count_ >= 16 && std::find(repeated.begin(), repeated.end(), tag) == repeated.end())
                 return;
             if (count_ >= fields_.size())
                 extra_.push_back({});
@@ -112,11 +111,13 @@ private:
         }
         return false;
     }
-    std::array<Field, 16> fields_{};
-    std::vector<Field>
-        extra_;  // Only explicitly declared repeated fields may overflow the inline array.
+    std::array<Field, 4> fields_{};
+    // Keep nested decoders small on the MCU task stack. Ordinary messages
+    // retain their 16-field limit; explicitly repeated fields may reach 128.
+    std::vector<Field> extra_;
     size_t count_ = 0;
 };
+static_assert(sizeof(Reader) <= 256, "Nested Studio decoders must stay small on the task stack");
 inline void Varint(Bytes& out, uint64_t value) {
     do {
         uint8_t b = value & 0x7f;
@@ -330,7 +331,7 @@ struct Model {
         Bytes out;
         for (size_t i = 0; i < count; ++i)
             Message(out, 1, Layer(order[i]));
-        Number(out, 2, 4 - count);
+        Number(out, 2, 4);
         Number(out, 3, 16);
         return out;
     }
@@ -478,6 +479,7 @@ public:
         saved.Load(saved_);
         return saved;
     }
+    bool LoadSavedModel(Model& saved) const { return saved.Load(saved_); }
     static Bytes BehaviorDetails(uint32_t id) { return id >= 1 && id <= 8 ? Details(id) : Bytes{}; }
     Bytes LockState(bool value) {
         unlocked_ = value;

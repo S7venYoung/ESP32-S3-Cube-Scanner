@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include "studio_diagnostics.h"
 namespace cube_dongle::studio {
 // All fingerprints are opaque validators, not IDs or hashes of the web bundle.
@@ -16,7 +17,7 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
         return error(0);
     const auto hash = [](const Bytes& bytes) { return Model::Hash(bytes.data(), bytes.size()); };
     const auto& model = rpc.model;
-    const Model stock, saved = rpc.SavedModel();
+    static const Model stock;
     auto equal = [](const Binding& a, const Binding& b) {
         return a.kind == b.kind && a.value == b.value && a.modifiers == b.modifiers;
     };
@@ -66,7 +67,7 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
         Number(body, 5, hash(physical));
         Number(body, 6, 8);
         Number(body, 7, 16);
-        Number(body, 8, 4 - model.count);
+        Number(body, 8, 4);
         Number(body, 9, 0);
         Number(body, 11, 32);
         for (size_t n = 0; n < model.count; ++n) {
@@ -87,11 +88,14 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
         return response;
     }
     if (op->tag == 10 && op->wire == 0) {
+        const auto saved = std::make_unique<Model>();
+        if (!rpc.LoadSavedModel(*saved))
+            return error(0);
         for (size_t n = 0; n < model.count; ++n) {
             const auto id = model.order[n];
             Bytes positions;
             for (size_t p = 0; p < 61; ++p)
-                if (!equal(model.map[id][p], saved.map[id][p]))
+                if (!equal(model.map[id][p], saved->map[id][p]))
                     Number(positions, 2, p);
             if (!positions.empty()) {
                 Number(positions, 1, id);

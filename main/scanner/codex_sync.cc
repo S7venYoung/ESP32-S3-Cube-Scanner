@@ -20,6 +20,7 @@
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_random.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -110,6 +111,9 @@ void SyncTask(void*) {
     bool overflow = false;
     char bytes[64];
     for (;;) {
+        // Always block for at least one tick, even on transport errors or a
+        // continuously full RX queue. Let idle/Wi-Fi/audio tasks run.
+        vTaskDelay(1);
 #if CONFIG_CUBE_STUDIO_RPC
         CubeStudioPoll();
         uint8_t studio_bytes[256];
@@ -166,6 +170,15 @@ void SyncTask(void*) {
                         Reply("CUBE-CODEX/2");
                     else if (line == "PAIR")
                         Reply("CUBE-PAIR " + IpAddress() + " " + token);
+#if CONFIG_CUBE_STUDIO_RPC
+                    else if (line == "DONGLE DIAG")
+                        Reply("CUBE-DIAG/1 reset=" + std::to_string(unsigned(esp_reset_reason())) +
+                              " uptime_ms=" + std::to_string(esp_timer_get_time() / 1000) +
+                              " heap_free=" + std::to_string(esp_get_free_heap_size()) +
+                              " heap_min=" + std::to_string(esp_get_minimum_free_heap_size()) +
+                              " sync_stack_free=" +
+                              std::to_string(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
 #if CONFIG_CUBE_SPLIT_BENCH
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
                     else if (line == "DONGLE")

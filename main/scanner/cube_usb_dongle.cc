@@ -274,8 +274,10 @@ bool StartCubeUsbDongle() {
 int CubeCdcRead(char* bytes, size_t size) {
     size_t count = 0;
     if (tinyusb_cdcacm_read(TINYUSB_CDC_ACM_0, reinterpret_cast<uint8_t*>(bytes), size, &count) !=
-        ESP_OK)
+        ESP_OK) {
+        vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(20)));
         return 0;
+    }
     if (!count)
         vTaskDelay(pdMS_TO_TICKS(20));
     return count;

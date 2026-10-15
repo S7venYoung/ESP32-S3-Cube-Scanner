@@ -31,5 +31,6 @@ cp build/xiaozhi.bin build/xingzhi_cube_dual_candidate.bin
 cp docs/cube-dual-candidate.md build/DUAL-CANDIDATE-NOT-FINAL.md
 cp docs/cube-auto-binding.md build/AUTO-BINDING.md
 cp docs/cube-dya-studio.md build/DYA-STUDIO.md
+cp docs/cube-dya-stability-fix.md build/DYA-STABILITY-FIX.md
 cd build
 sha256sum merged-binary.bin xingzhi_cube_dual_candidate.bin xiaozhi.bin generated_assets.bin bootloader/bootloader.bin partition_table/partition-table.bin ota_data_initial.bin > SHA256SUMS
