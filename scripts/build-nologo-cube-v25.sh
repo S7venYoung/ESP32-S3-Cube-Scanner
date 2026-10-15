@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 python -m unittest discover -s scripts/tests -q
+g++ -std=c++17 -Wall -Wextra -Werror tests/keyboard_theme_state_test.cc -o /tmp/keyboard-theme-state-test
+/tmp/keyboard-theme-state-test
 g++ -std=c++17 -Wall -Wextra -Werror tests/scanner_policy_test.cc -o /tmp/scanner-policy-test
 /tmp/scanner-policy-test
 g++ -std=c++17 tests/keyboard_status_test.cc -o /tmp/keyboard-status-test

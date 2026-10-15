@@ -15,3 +15,22 @@
 此版本被动观察键盘广播，不连接/解绑键盘。需要键盘实际启用 Prospector 状态广播；不能从一个独立 Prospector 扫描仪 UF2 的构建链接推断左右手固件。若从未发出 Velvet46 名称或状态广播，Cube 无法凭空发现它。
 
 纯 C++ ASAN/UBSAN 测试覆盖精确名称、空名称、同地址续期、不同地址隔离、改名撤销、超时、非法状态数据和有界退避；SDK 构建验证编译，不代替实机收包验证。异常发热时保持断电，不为复现持续通电。
+# Codex and Macintosh keyboard telemetry
+
+Both dashboards now refresh their layer, WPM and left/right battery widgets from
+real scanner telemetry, including immediately after a theme switch. Macintosh
+also refreshes the keyboard host transport, Bluetooth profile (1-based) and BLE
+connection indicator. Codex shows keyboard transport next to the layer; its
+upper-right transport still describes Mac quota synchronization, not keyboard BLE.
+
+Canonical keyboard status supplies layer/profile/total WPM. Fight packets supply
+independent left/right WPM and modifiers. Missing fight battery values fall back
+to valid canonical battery values, without turning unknown values into zero.
+Expired telemetry clears values and pressed modifier backgrounds. This does not
+change keyboard firmware, pairing, the scanning policy, or fight animation assets.
+
+Validation: host-side state tests include offline, BLE/USB, per-side battery
+fallback, true 0%, invalid values, fight-only and expiry cases. UI binding checks
+run alongside scanner regression tests. ESP-IDF compilation and physical display
+validation are pending; no Actions build is started by this change.
+

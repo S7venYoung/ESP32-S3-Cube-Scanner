@@ -32,6 +32,19 @@ private:
     void UpdateMetrics();
     void SetupMacintosh();
     void UpdateMacintosh();
+    void UpdateKeyboardThemes();
+    void ApplyMacModifierState(uint8_t modifiers);  // Caller holds the LVGL lock.
+    lv_obj_t* codex_keyboard_transport_ = nullptr;
+    lv_obj_t* codex_layer_ = nullptr;
+    lv_obj_t* codex_wpm_ = nullptr;
+    lv_obj_t* codex_kb_battery_text_[2] = {};
+    lv_obj_t* codex_kb_battery_fill_[2] = {};
+    lv_obj_t* mac_layer_ = nullptr;
+    lv_obj_t* mac_profile_ = nullptr;
+    lv_obj_t* mac_ble_ = nullptr;
+    lv_obj_t* mac_wpm_title_ = nullptr;
+    lv_obj_t* mac_kb_battery_text_[2] = {};
+    lv_obj_t* mac_kb_battery_fill_[2] = {};
     bool mac_theme_ = false;
     std::string dashboard_theme_ = "codex";
     lv_obj_t* arcade_dashboard_ = nullptr;
