@@ -11,6 +11,7 @@
             "name": "xingzhi-cube-1.54tft-wifi-codex",
             "sdkconfig_append": [
                 "CONFIG_ZMK_SCANNER_MODE=y",
+                "CONFIG_ZMK_SCANNER_NAME_FILTER=\"Velvet46\"",
                 "CONFIG_USE_SERVER_AEC=y",
                 "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
                 "CONFIG_USE_HOTSPOT_WIFI_PROVISIONING=y",

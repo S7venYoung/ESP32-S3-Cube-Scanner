@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 python -m unittest discover -s scripts/tests -q
+g++ -std=c++17 -Wall -Wextra -Werror tests/scanner_policy_test.cc -o /tmp/scanner-policy-test
+/tmp/scanner-policy-test
 g++ -std=c++17 tests/keyboard_status_test.cc -o /tmp/keyboard-status-test
 /tmp/keyboard-status-test
 g++ -std=c++17 tests/arcade_motion_test.cc -o /tmp/arcade-motion-test
@@ -32,5 +34,6 @@ grep -qx 'CONFIG_ESP_CONSOLE_UART_DEFAULT=y' sdkconfig
 cp sdkconfig build/sdkconfig
 cp build/xiaozhi.bin build/xingzhi_cube_154_wifi_codex.bin
 cp docs/nologo-cube-codex-v2.5.md build/FLASHING.md
+cp docs/velvet46-scanner-fix.md build/SCANNER-VELVET46.md
 cd build
 sha256sum merged-binary.bin xingzhi_cube_154_wifi_codex.bin xiaozhi.bin generated_assets.bin bootloader/bootloader.bin partition_table/partition-table.bin ota_data_initial.bin > SHA256SUMS
