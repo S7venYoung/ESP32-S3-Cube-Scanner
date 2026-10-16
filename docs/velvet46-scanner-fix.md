@@ -17,6 +17,26 @@
 纯 C++ ASAN/UBSAN 测试覆盖精确名称、空名称、同地址续期、不同地址隔离、改名撤销、超时、非法状态数据和有界退避；SDK 构建验证编译，不代替实机收包验证。异常发热时保持断电，不为复现持续通电。
 # Codex and Macintosh keyboard telemetry
 
+## Scanner BOOT download shortcut
+
+On the Xingzhi scanner variant, hold BOOT for 3 seconds to request ROM download
+mode. A notice appears; release BOOT, wait for USB re-enumeration, then refresh
+the flasher's port list and select the download port. The request uses the S3
+ROM-download flag in a shutdown handler and a 600ms non-blocking timer before
+restart. It does not install TinyUSB or change USB descriptors, erase NVS, or
+flash anything automatically. On timer/handler failure it reports an error and
+does not restart, allowing a retry. Normal double-click BOOT enters Wi-Fi setup;
+short-click voice and long volume-down theme switching remain unchanged.
+
+The non-scanner variant retains its old BOOT long-press Wi-Fi setup behaviour.
+The dongle branch is unchanged. The first update to install this shortcut still
+requires the old hardware BOOT/power procedure. If the application is hung, that
+hardware procedure remains the recovery path. Once in ROM, normal scanning and
+voice stop until reset/restart; after flashing, release BOOT and reset/power-cycle
+if the tool does not return the board to normal boot. Prefer USB connected before
+requesting download mode. SDK compilation and physical USB re-enumeration still
+need verification; host tests cover callback routing and mocked failure cleanup.
+
 ## Animation cadence and modifier latency
 
 Arcade animation now targets 25 updates/sec (40ms timer), with separate windup,
