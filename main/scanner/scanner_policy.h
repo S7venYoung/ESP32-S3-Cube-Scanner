@@ -9,6 +9,18 @@
 namespace scanner_policy {
 constexpr int64_t kStatusLeaseUs = 90000000;
 constexpr int64_t kNameLeaseUs = 180000000;
+struct ScanTiming {
+    uint16_t interval, window;
+};
+// Match the original observer's requested full window while idle. S3 shares
+// its radio with Wi-Fi, so leave room for active Xiaozhi voice/network setup.
+constexpr ScanTiming Timing(bool voice_active, bool hot = false) {
+    return hot            ? ScanTiming{0x100, 0x20}
+           : voice_active ? ScanTiming{0x60, 0x18}
+                          : ScanTiming{0x30, 0x30};
+}
+constexpr int kScanSliceMs = 1000;
+constexpr int kScanRestartMs = 1;
 // Anonymous packets cannot prove a device's advertised name. A nonempty
 // filter requires an exact, recently observed name at the same BLE address.
 class Names {

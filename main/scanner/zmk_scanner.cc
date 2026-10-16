@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -45,7 +46,9 @@ scanner_policy::Retry scan_retry;
 ble_npl_callout scan_callout;
 bool host_synced = false;
 std::atomic<bool> startup_requested{false};
-std::atomic<bool> modifier_publish_pending{false};
+std::atomic<bool> priority_update_pending{false};
+std::atomic<bool> voice_active{false};
+std::atomic<bool> thermal_limited{false};
 void BeginDiscovery();
 void ScanAgain(ble_npl_event*) {
     if (host_synced)
@@ -53,12 +56,9 @@ void ScanAgain(ble_npl_event*) {
 }
 
 void PublishModifiers() {
-    if (modifier_publish_pending.exchange(true))
-        return;
-    Application::GetInstance().Schedule([]() {
-        modifier_publish_pending = false;
-        display->SetMacModifierState(GetScannerModifiers());
-    });
+    // Bounded latest-state mailbox, consumed by the LVGL timer rather than
+    // queued behind voice/application work. Never call LVGL from BLE RX.
+    priority_update_pending = true;
 }
 
 void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
@@ -105,10 +105,16 @@ void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
                 if (keyboard_seen_us < 0 ||
                     now - keyboard_seen_us > scanner_policy::kStatusLeaseUs ||
                     keyboard_address == address) {
+                    const bool state_changed =
+                        !keyboard_data.online ||
+                        std::strcmp(keyboard_data.layer, keyboard.layer) != 0 ||
+                        keyboard_data.profile != keyboard.profile ||
+                        keyboard_data.usb != keyboard.usb || keyboard_data.ble != keyboard.ble;
                     keyboard_data = keyboard;
                     keyboard_address = address;
                     keyboard_seen_us = now;
-                    changed = modifier_timeline.Observe(1, keyboard.modifiers, now);
+                    changed =
+                        modifier_timeline.Observe(1, keyboard.modifiers, now) || state_changed;
                 }
             }
             if (changed)
@@ -138,7 +144,8 @@ int OnGapEvent(ble_gap_event* event, void*) {
         scan_retry.Healthy();
         Prune(esp_timer_get_time());
         Refresh(true);
-        ble_npl_callout_reset(&scan_callout, ble_npl_time_ms_to_ticks32(200));
+        ble_npl_callout_reset(&scan_callout,
+                              ble_npl_time_ms_to_ticks32(scanner_policy::kScanRestartMs));
         return 0;
     }
     if (event->type != BLE_GAP_EVENT_DISC)
@@ -188,10 +195,19 @@ void BeginDiscovery() {
         ble_gap_disc_params params = {};
         params.passive = 0;  // Scan responses may contain the device name.
         params.filter_duplicates = 0;
-        // Low scan duty cycle leaves airtime for Xiaozhi's Wi-Fi audio.
-        params.itvl = 0x100;
-        params.window = 0x20;
-        rc = ble_gap_disc(address_type, 5000, &params, OnGapEvent, nullptr);
+        const bool voice = voice_active.load();
+        const bool hot = thermal_limited.load();
+        const auto timing = scanner_policy::Timing(voice, hot);
+        params.itvl = timing.interval;
+        params.window = timing.window;
+        static int last_mode = -1;
+        const int mode = hot ? 2 : voice ? 1 : 0;
+        if (last_mode != mode) {
+            last_mode = mode;
+            ESP_LOGI(kTag, "Scan window=%u interval=%u voice=%d hot=%d", params.window, params.itvl,
+                     voice, hot);
+        }
+        rc = ble_gap_disc(address_type, scanner_policy::kScanSliceMs, &params, OnGapEvent, nullptr);
     }
     if (rc != 0) {
         if (rc == BLE_HS_EALREADY)
@@ -229,6 +245,10 @@ uint8_t GetScannerModifiers() {
     return modifier_timeline.Get(esp_timer_get_time());
 }
 
+void SetScannerVoiceActive(bool active) { voice_active = active; }
+void SetScannerThermalLimited(bool limited) { thermal_limited = limited; }
+bool TakeScannerPriorityUpdate() { return priority_update_pending.exchange(false); }
+
 FightTelemetry GetFightTelemetry() {
     std::lock_guard<std::mutex> lock(fight_mutex);
     return FightSnapshotAt(fight_data, fight_seen_us, esp_timer_get_time());
@@ -247,8 +267,8 @@ KeyboardStatus GetKeyboardStatus() {
 
 namespace {
 void StartScannerTask(void*) {
-    // Discovery is optional (it currently supplies names/RSSI, not keyboard
-    // telemetry). Protect native HTTP/audio task stacks and DMA allocations.
+    // Protect native HTTP/audio task stacks and DMA allocations before starting
+    // the optional keyboard telemetry observer.
     const auto caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     bool enough = false;
     for (unsigned attempt = 0; attempt < 8; ++attempt) {

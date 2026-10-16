@@ -17,6 +17,36 @@
 纯 C++ ASAN/UBSAN 测试覆盖精确名称、空名称、同地址续期、不同地址隔离、改名撤销、超时、非法状态数据和有界退避；SDK 构建验证编译，不代替实机收包验证。异常发热时保持断电，不为复现持续通电。
 # Codex and Macintosh keyboard telemetry
 
+## Original-scanner receive strategy on Cube
+
+The idle scan request now uses interval=window=0x30 (30ms), matching the original
+Prospector observer's requested 100% scan window. Scanning is renewed in one-second
+slices with a 1ms requested restart rather than pausing 200ms after every five
+seconds. The short slices allow runtime voice/thermal budget changes without
+cancel/restart races. The actual radio scheduler still shares time with Wi-Fi;
+these are requested windows, not a measured 100% BLE airtime guarantee.
+
+Listening, speaking, connecting, activation and Wi-Fi setup request 25% scanning
+(60ms interval/15ms window). If the board supplies temperature, >=65C requests
+12.5% scanning until <=60C. This is a load-reduction heuristic, not a thermal
+safety certification. If the board provides no sensor reading, this temperature
+fallback cannot operate. Scan-mode changes are logged for physical diagnosis.
+
+Modifier/layer/profile/host-connection changes set a bounded latest-state mailbox.
+A 50ms LVGL timer consumes it independently of application/voice work; the BLE
+callback never draws or queues per-packet closures. The timer does nothing if
+there is no state change, except checking modifier timeout release. Quota/battery
+periodic refresh and the 40ms fight-animation timer remain separate. This does
+not promise visibility of every sub-50ms pulse: it is a status display, not a
+lossless key-event logger. No keyboard firmware update or packet change is
+required, and name filtering and stale-input protections remain enabled.
+
+Reference: S7venYoung/prospector-zmk-module at
+a94868a0a398c766738a47712706920f5b99fb29, src/status_scanner.c and src/scanner_core.c.
+Local validation: scan-budget boundary tests, priority mailbox wiring, LVGL timer
+lifetime checks, voice/thermal gating and existing host regressions. ESP-IDF build,
+physical Cmd timing, power/temperature and simultaneous Xiaozhi voice need testing.
+
 ## Scanner BOOT download shortcut
 
 On the Xingzhi scanner variant, hold BOOT for 3 seconds to request ROM download

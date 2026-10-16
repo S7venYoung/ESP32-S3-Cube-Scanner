@@ -33,6 +33,9 @@ private:
     void SetupMacintosh();
     void UpdateMacintosh();
     void UpdateKeyboardThemes();
+    void PollKeyboardPriority();  // LVGL timer context already holds the display lock.
+    uint8_t shown_keyboard_modifiers_ = 0xff;
+    bool scanner_heat_limited_ = false;
     void ApplyMacModifierState(uint8_t modifiers);  // Caller holds the LVGL lock.
     lv_obj_t* codex_keyboard_transport_ = nullptr;
     lv_obj_t* codex_layer_ = nullptr;

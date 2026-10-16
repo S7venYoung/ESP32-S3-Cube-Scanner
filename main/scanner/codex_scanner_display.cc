@@ -12,9 +12,9 @@
 #include "codex_metrics.h"
 #include "dashboard_command.h"
 #include "keyboard_theme_state.h"
-#include "modifier_timeline.h"
 #include "macintosh_theme.h"
 #include "mcp_server.h"
+#include "modifier_timeline.h"
 #include "settings.h"
 #include "white_theme.h"
 #include "zmk_scanner.h"
@@ -179,6 +179,21 @@ void CodexScannerDisplay::SetupUI() {
     lv_obj_move_foreground(notice_panel_);
     UpdateAssistantOverlay();
     UpdateMetrics();
+    // Like the original scanner: a fast display mailbox, independent of voice
+    // work and the 1Hz quota/battery refresh. Timer runs under LVGL ownership.
+    auto* input_timer = lv_timer_create(
+        [](lv_timer_t* timer) {
+            static_cast<CodexScannerDisplay*>(lv_timer_get_user_data(timer))
+                ->PollKeyboardPriority();
+        },
+        50, this);
+    if (input_timer)
+        lv_obj_add_event_cb(
+            dashboard_,
+            [](lv_event_t* event) {
+                lv_timer_delete(static_cast<lv_timer_t*>(lv_event_get_user_data(event)));
+            },
+            LV_EVENT_DELETE, input_timer);
 }
 
 void CodexScannerDisplay::RegisterDashboardTools() {
@@ -389,6 +404,21 @@ void CodexScannerDisplay::UpdateMacintosh() {
     }
 }
 
+void CodexScannerDisplay::PollKeyboardPriority() {
+    const auto modifiers = GetScannerModifiers();
+    const bool changed = TakeScannerPriorityUpdate();
+    if (!changed && shown_keyboard_modifiers_ == modifiers)
+        return;
+    shown_keyboard_modifiers_ = modifiers;
+    if (changed) {
+        UpdateKeyboardThemes();
+        UpdateMacintosh();
+        WhiteRefresh(white_dashboard_);
+    } else {
+        ApplyMacModifierState(modifiers);
+    }
+}
+
 void CodexScannerDisplay::UpdateKeyboardThemes() {
     const auto kb = GetKeyboardStatus();
     const auto fight = GetFightTelemetry();
@@ -474,6 +504,9 @@ void CodexScannerDisplay::UpdateAssistantOverlay() {
         return;
     uint32_t color = kMuted;
     const auto state = Application::GetInstance().GetDeviceState();
+    SetScannerVoiceActive(state == kDeviceStateListening || state == kDeviceStateSpeaking ||
+                          state == kDeviceStateConnecting || state == kDeviceStateWifiConfiguring ||
+                          state == kDeviceStateActivating);
     switch (state) {
         case kDeviceStateListening:
             color = kYellow;
@@ -578,6 +611,13 @@ void CodexScannerDisplay::UpdateStatusBar(bool update_all) {
     const bool has_battery = board.GetBatteryLevel(level, charging, discharging);
     float temperature = 0;
     const bool has_temperature = board.GetTemperature(temperature);
+    if (has_temperature) {
+        if (temperature >= 65)
+            scanner_heat_limited_ = true;
+        else if (temperature <= 60)
+            scanner_heat_limited_ = false;
+        SetScannerThermalLimited(scanner_heat_limited_);
+    }
     DisplayLockGuard lock(this);
     if (dashboard_ == nullptr)
         return;

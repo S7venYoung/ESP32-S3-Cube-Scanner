@@ -1,6 +1,15 @@
 #include "../main/scanner/scanner_policy.h"
 #include <cassert>
 int main() {
+    auto timing = scanner_policy::Timing(false);
+    assert(timing.window == timing.interval && timing.window == 0x30);
+    timing = scanner_policy::Timing(true);
+    assert(timing.window * 4 == timing.interval);
+    timing = scanner_policy::Timing(false, true);
+    assert(timing.window * 8 == timing.interval);
+    const auto hot_voice = scanner_policy::Timing(true, true);
+    assert(hot_voice.window == timing.window && hot_voice.interval == timing.interval);
+    assert(scanner_policy::kScanSliceMs == 1000 && scanner_policy::kScanRestartMs == 1);
     scanner_policy::Names names;
     std::string out;
     assert(!names.Resolve("A", "", "Velvet46", true, 0, out));
