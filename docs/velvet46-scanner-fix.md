@@ -17,6 +17,33 @@
 纯 C++ ASAN/UBSAN 测试覆盖精确名称、空名称、同地址续期、不同地址隔离、改名撤销、超时、非法状态数据和有界退避；SDK 构建验证编译，不代替实机收包验证。异常发热时保持断电，不为复现持续通电。
 # Codex and Macintosh keyboard telemetry
 
+## Animation cadence and modifier latency
+
+Arcade animation now targets 25 updates/sec (40ms timer), with separate windup,
+strike and recovery phases. WPM controls attack cadence rather than truncating
+an action when a sample changes. Existing sprites get eased lunge/jump/return
+motion; projectile travel uses strike-relative time. The stage remains static,
+with no new sprites or full-screen refresh loop. Actual LCD FPS needs hardware
+measurement; 25Hz is the animation scheduling target, not a measured result.
+
+All themes and queued input callbacks now read one modifier timeline. Both
+canonical status and fight telemetry can report transitions; repeated unchanged
+values from the other protocol cannot overwrite a newer transition. Pending UI
+notifications are coalesced and read the latest state at execution, rather than
+replaying captured old presses. The three-second stale-input release remains.
+
+The matching right-keyboard update schedules telemetry after keycode events
+and samples every 40ms for an 800ms input burst, returning to 200ms when idle.
+The packet layout and radio advertising interval are unchanged. This reduces
+sampling delay but BLE scanning is lossy: a 40ms sample interval is not an
+end-to-end latency guarantee, and very short presses can still miss over-air
+advertising/scan windows. Full benefit requires updating Cube and right keyboard;
+left firmware and settings reset are not required.
+
+Host tests exercise Cmd transitions, delayed duplicate packets, press/release,
+timeout, independent fighter cadence, complete recovery, and tick wraparound.
+SDK compilation, LCD frame timing and physical Cmd latency remain unverified.
+
 ## Short radio-gap handling
 
 Fight telemetry now has separate 3-second input and 90-second presence leases.

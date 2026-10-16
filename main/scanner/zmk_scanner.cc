@@ -3,6 +3,7 @@
 #include "board.h"
 #include "codex_scanner_display.h"
 #include "keyboard_status.h"
+#include "modifier_timeline.h"
 #include "prospector_modifiers.h"
 #include "scanner_policy.h"
 
@@ -31,9 +32,7 @@ CodexScannerDisplay* display = nullptr;
 std::vector<ScannerDevice> devices;
 const std::string name_filter = CONFIG_ZMK_SCANNER_NAME_FILTER;
 int64_t last_refresh_us = 0;
-std::string modifier_address;
-int64_t modifier_seen_us = -1;
-uint8_t modifier_state = 0;
+ModifierTimeline modifier_timeline;
 std::mutex fight_mutex;
 FightTelemetry fight_data;
 std::string fight_address;
@@ -46,30 +45,20 @@ scanner_policy::Retry scan_retry;
 ble_npl_callout scan_callout;
 bool host_synced = false;
 std::atomic<bool> startup_requested{false};
+std::atomic<bool> modifier_publish_pending{false};
 void BeginDiscovery();
 void ScanAgain(ble_npl_event*) {
     if (host_synced)
         BeginDiscovery();
 }
 
-void ExpireModifiers(int64_t now) {
-    {
-        std::lock_guard<std::mutex> lock(fight_mutex);
-        if (fight_seen_us >= 0 && now - fight_seen_us > kFightInputLeaseUs &&
-            modifier_seen_us >= 0 && modifier_address == fight_address) {
-            // Keep presence/battery and sequence; only release transient input.
-            modifier_seen_us = -1;
-            modifier_address.clear();
-            modifier_state = 0;
-            Application::GetInstance().Schedule([]() { display->SetMacModifierState(0); });
-        }
-    }
-    if (modifier_seen_us >= 0 && now - modifier_seen_us > kFightInputLeaseUs) {
-        modifier_seen_us = -1;
-        modifier_address.clear();
-        modifier_state = 0;
-        Application::GetInstance().Schedule([]() { display->SetMacModifierState(0); });
-    }
+void PublishModifiers() {
+    if (modifier_publish_pending.exchange(true))
+        return;
+    Application::GetInstance().Schedule([]() {
+        modifier_publish_pending = false;
+        display->SetMacModifierState(GetScannerModifiers());
+    });
 }
 
 void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
@@ -98,40 +87,32 @@ void ReceiveModifiers(const ble_gap_event* event, const std::string& address,
                     accepted = true;
                 }
             }
-            if (accepted && fight.modifiers != modifier_state) {
-                modifier_state = fight.modifiers;
-                modifier_address = address;
-                modifier_seen_us = now;
-                Application::GetInstance().Schedule(
-                    [fight]() { display->SetMacModifierState(fight.modifiers); });
-            } else if (accepted)
-                modifier_seen_us = now;
+            if (accepted) {
+                bool changed;
+                {
+                    std::lock_guard<std::mutex> lock(fight_mutex);
+                    changed = modifier_timeline.Observe(0, fight.modifiers, now);
+                }
+                if (changed)
+                    PublishModifiers();
+            }
         }
-        uint8_t mods = 0;
         KeyboardStatus keyboard;
         if (data[pos] == 0xff && ParseKeyboardStatus(data + pos + 1, length - 1, keyboard)) {
-            std::lock_guard<std::mutex> lock(fight_mutex);
-            if (keyboard_seen_us < 0 || now - keyboard_seen_us > scanner_policy::kStatusLeaseUs ||
-                keyboard_address == address) {
-                keyboard_data = keyboard;
-                keyboard_address = address;
-                keyboard_seen_us = now;
+            bool changed = false;
+            {
+                std::lock_guard<std::mutex> lock(fight_mutex);
+                if (keyboard_seen_us < 0 ||
+                    now - keyboard_seen_us > scanner_policy::kStatusLeaseUs ||
+                    keyboard_address == address) {
+                    keyboard_data = keyboard;
+                    keyboard_address = address;
+                    keyboard_seen_us = now;
+                    changed = modifier_timeline.Observe(1, keyboard.modifiers, now);
+                }
             }
-        }
-        bool fight_active;
-        {
-            std::lock_guard<std::mutex> lock(fight_mutex);
-            fight_active = fight_seen_us >= 0 && now - fight_seen_us <= kFightInputLeaseUs;
-        }
-        if (!fight_active && (modifier_address.empty() || modifier_address == address) &&
-            data[pos] == 0xff && ParseProspectorModifiers(data + pos + 1, length - 1, mods)) {
-            modifier_address = address;
-            modifier_seen_us = now;
-            if (mods != modifier_state) {
-                modifier_state = mods;
-                Application::GetInstance().Schedule(
-                    [mods]() { display->SetMacModifierState(mods); });
-            }
+            if (changed)
+                PublishModifiers();
         }
         pos += length;
     }
@@ -155,7 +136,6 @@ int OnGapEvent(ble_gap_event* event, void*) {
         if (!host_synced)
             return 0;
         scan_retry.Healthy();
-        ExpireModifiers(esp_timer_get_time());
         Prune(esp_timer_get_time());
         Refresh(true);
         ble_npl_callout_reset(&scan_callout, ble_npl_time_ms_to_ticks32(200));
@@ -183,7 +163,6 @@ int OnGapEvent(ble_gap_event* event, void*) {
     const bool status = scanner_policy::HasStatus(event->disc.data, event->disc.length_data);
     if (!names.Resolve(address, advertised, name_filter, status, now, name))
         return 0;
-    ExpireModifiers(now);
     ReceiveModifiers(event, address, name, now);
     ScannerDevice latest{name, address, event->disc.rssi, now};
     if (existing != devices.end())
@@ -244,6 +223,11 @@ void HostTask(void*) {
     nimble_port_freertos_deinit();
 }
 }  // namespace
+
+uint8_t GetScannerModifiers() {
+    std::lock_guard<std::mutex> lock(fight_mutex);
+    return modifier_timeline.Get(esp_timer_get_time());
+}
 
 FightTelemetry GetFightTelemetry() {
     std::lock_guard<std::mutex> lock(fight_mutex);

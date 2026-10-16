@@ -46,7 +46,6 @@ class Velvet46ScannerTest(unittest.TestCase):
     def test_radio_gap_keeps_presence_not_input(self):
         source = (ROOT / 'main/scanner/zmk_scanner.cc').read_text()
         self.assertIn('FightSnapshotAt(fight_data, fight_seen_us,', source)
-        expire = source[source.index('void ExpireModifiers'):source.index('void ReceiveModifiers')]
-        self.assertNotIn('fight_seen_us = -1', expire)
-        self.assertIn('kFightInputLeaseUs', expire)
-        self.assertNotIn('60000000', expire)
+        self.assertIn('modifier_timeline.Get(esp_timer_get_time())', source)
+        self.assertIn('GetScannerModifiers()', source)
+        self.assertNotIn('60000000', source)

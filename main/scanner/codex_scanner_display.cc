@@ -12,6 +12,7 @@
 #include "codex_metrics.h"
 #include "dashboard_command.h"
 #include "keyboard_theme_state.h"
+#include "modifier_timeline.h"
 #include "macintosh_theme.h"
 #include "mcp_server.h"
 #include "settings.h"
@@ -392,7 +393,7 @@ void CodexScannerDisplay::UpdateKeyboardThemes() {
     const auto kb = GetKeyboardStatus();
     const auto fight = GetFightTelemetry();
     const auto state = KeyboardThemeSnapshot(kb, fight);
-    ApplyMacModifierState(state.modifiers);
+    ApplyMacModifierState(GetScannerModifiers());
     if (dashboard_theme_ == "codex") {
         CodexDrawSetText(codex_keyboard_transport_, state.transport);
         CodexDrawSetText(codex_layer_, state.layer);

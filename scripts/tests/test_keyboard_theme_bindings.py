@@ -19,7 +19,7 @@ class KeyboardThemeBindings(unittest.TestCase):
         code = (ROOT / "main/scanner/codex_scanner_display.cc").read_text()
         refresh = code.split("void CodexScannerDisplay::UpdateKeyboardThemes()", 1)[1]
         refresh = refresh.split("void CodexScannerDisplay::UpdateMetrics()", 1)[0]
-        self.assertIn("ApplyMacModifierState(state.modifiers)", refresh)
+        self.assertIn("ApplyMacModifierState(GetScannerModifiers())", refresh)
         self.assertNotIn("SetMacModifierState(", refresh)
 
 
