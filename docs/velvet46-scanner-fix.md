@@ -17,6 +17,18 @@
 纯 C++ ASAN/UBSAN 测试覆盖精确名称、空名称、同地址续期、不同地址隔离、改名撤销、超时、非法状态数据和有界退避；SDK 构建验证编译，不代替实机收包验证。异常发热时保持断电，不为复现持续通电。
 # Codex and Macintosh keyboard telemetry
 
+## TODAY token number baseline and units
+
+The existing atlas's brush M/K/dot cells include neighbouring-cell fragments and
+different vertical padding. TODAY numeric rendering now uses explicit ink bounds
+for the original digit artwork, a shared bottom baseline, proportional digit
+advances, a narrow clean decimal point, and clear outlined self-drawn M/K units.
+No system fonts, new heap buffers or edits to generated image assets are required.
+The black/red TODAY brush panel, fighters, modifiers and other text are unchanged.
+Tests check 1.6M, 38.2M, 999.9K, unscaled 999 and unknown values, including per-glyph
+baseline, unit visibility and output-buffer guards. A host-rendered enlarged PNG
+was visually inspected; physical LCD confirmation and SDK build are pending.
+
 ## Original-scanner receive strategy on Cube
 
 The idle scan request now uses interval=window=0x30 (30ms), matching the original
