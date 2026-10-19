@@ -1,3 +1,17 @@
+# Lower fight-theme WPM thresholds
+
+Visual triggers now use 3 WPM for basic attacks, 10 WPM for advanced moves,
+25 WPM for all four regular moves, and 40 WPM for super charge. Charge takes
+3 seconds of sustained qualifying WPM; the super starts on the next available
+attack, preserving windup/strike/recovery. Falling below 40 resets charge.
+Raw keyboard WPM, packets, batteries and actual typing statistics are unchanged.
+Zero input returns to idle after any action already in progress completes.
+Only Cube needs this change; no keyboard firmware update is required.
+Host tests cover each threshold and one below it, the charge duration, offline
+reset, independent hands, existing recovery, sequence and expiry regressions.
+SDK compilation and physical animation validation are pending. Actions remain
+manual and are not started by this change.
+
 # 星智 Cube 扫描仪识别修复 · Velvet46
 
 基于用户实际刷入的扫描仪版本 461e934cc3a9bc1ef09211ac2fbf25fc880e8219，继续使用 `codex/nologo-xingzhi-cube-154`。不是 dongle 版本，不改动配对、供电或充电设置。键盘配套使用 `codex/zmk04-dya-Prospector`，右手格斗广播改为真实键盘名称；不改变矩阵、键位或设备角色。
@@ -135,4 +149,3 @@ Validation: host-side state tests include offline, BLE/USB, per-side battery
 fallback, true 0%, invalid values, fight-only and expiry cases. UI binding checks
 run alongside scanner regression tests. ESP-IDF compilation and physical display
 validation are pending; no Actions build is started by this change.
-

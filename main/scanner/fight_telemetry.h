@@ -32,7 +32,7 @@ inline bool ParseFightTelemetry(const uint8_t* data, size_t length, FightTelemet
     return true;
 }
 inline uint8_t FightActionForWpm(int wpm) {
-    return wpm >= 70 ? 3 : wpm >= 30 ? 2 : wpm >= 5 ? 1 : 0;
+    return wpm >= 40 ? 3 : wpm >= 10 ? 2 : wpm >= 3 ? 1 : 0;
 }
 // Sequence is a wrapping 16-bit counter. Repeated radio copies must not
 // keep old typing speeds alive indefinitely; a fresh session may restart it.

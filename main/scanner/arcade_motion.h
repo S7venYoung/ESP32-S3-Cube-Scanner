@@ -27,16 +27,16 @@ struct ArcadeMotion {
             return;
         }
         elapsed += delta;
-        if (wpm >= 70)
-            charge = std::min<uint32_t>(charge + delta, 4000);
+        if (wpm >= 40)
+            charge = std::min<uint32_t>(charge + delta, 3000);
         else
             charge = 0;
         const uint32_t period = std::clamp(1400 - std::max(0, wpm) * 8, 380, 1400);
-        if (!phase && wpm >= 5 && elapsed >= period) {
+        if (!phase && wpm >= 3 && elapsed >= period) {
             elapsed = 0;
             ++attacks;
-            super = charge >= 4000;
-            strike = super ? 5 : 1 + ((attacks - 1) % (wpm >= 45 ? 4 : wpm >= 20 ? 2 : 1));
+            super = charge >= 3000;
+            strike = super ? 5 : 1 + ((attacks - 1) % (wpm >= 25 ? 4 : wpm >= 10 ? 2 : 1));
             if (super)
                 charge = 0;
             action_ms = 0;
@@ -76,7 +76,7 @@ struct ArcadeMotion {
         if (!phase) {
             const int t = (now + 190) % 1040;
             y = t < 520 ? ArcadeEase(t, 520, 2) : 2 - ArcadeEase(t - 520, 520, 2);
-            if (wpm < 5)
+            if (wpm < 3)
                 elapsed = 0;
         }
     }

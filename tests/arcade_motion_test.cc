@@ -1,6 +1,36 @@
 #include "../main/scanner/arcade_motion.h"
 #include <cassert>
 int main() {
+    // Boundary tests use real, unscaled WPM values.
+    auto poses_at = [](int wpm) {
+        ArcadeMotion motion;
+        unsigned seen = 0;
+        for (uint32_t now = 40; now <= 16000; now += 40) {
+            motion.Step(now, wpm, true);
+            seen |= 1u << motion.pose;
+        }
+        return seen;
+    };
+    assert(poses_at(2) == 1);
+    assert((poses_at(3) & (1u << 1)) && !(poses_at(3) & (1u << 2)));
+    assert(!(poses_at(9) & (1u << 2)));
+    assert(poses_at(10) & (1u << 2));
+    assert(!(poses_at(24) & ((1u << 3) | (1u << 4))));
+    assert((poses_at(25) & ((1u << 3) | (1u << 4))) == ((1u << 3) | (1u << 4)));
+    assert(!(poses_at(39) & (1u << 5)));
+    assert(poses_at(40) & (1u << 5));
+    ArcadeMotion charged;
+    uint32_t first_super = 0;
+    for (uint32_t now = 40; now <= 4200; now += 40) {
+        charged.Step(now, 40, true);
+        if (charged.super && !first_super)
+            first_super = now;
+        if (now < 3000)
+            assert(!charged.super);
+    }
+    assert(first_super >= 3000 && first_super <= 4200);
+    charged.Step(4240, 0, false);
+    assert(!charged.super && charged.charge== 0 && charged.pose== 0);
     ArcadeMotion left, right;
     assert(ArcadeIdleFrame(0, 0) == 0);
     assert(ArcadeIdleFrame(260, 0) == 1);
