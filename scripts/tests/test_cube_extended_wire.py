@@ -50,13 +50,13 @@ class ExtendedWireTest(unittest.TestCase):
     def test_fast_geometry_and_metadata(self):
         p = self.modules[0]
         response = self.call(0, p.Request(get_snapshot=True))
-        self.assertEqual(response.snapshot.behavior_count, 8)
+        self.assertEqual(response.snapshot.behavior_count, 12)
         self.assertEqual(response.snapshot.available_layers, 4)
         response = self.call(0, p.Request(get_physical_layout=p.GetPhysicalLayoutRequest(layout_index=0)))
         self.assertEqual(len(response.get_physical_layout.layout.keys), 61)
         response = self.call(0, p.Request(list_behaviors=p.ListBehaviorsRequest(details=2, include_alias=True)))
-        self.assertEqual(len(response.list_behaviors.behaviors), 8)
-        self.assertEqual(len({b.def_fp for b in response.list_behaviors.behaviors}), 8)
+        self.assertEqual(len(response.list_behaviors.behaviors), 12)
+        self.assertEqual(len({b.def_fp for b in response.list_behaviors.behaviors}), 12)
         self.assertTrue(all(b.details.display_name for b in response.list_behaviors.behaviors))
 
     def test_negative_default_layer_sentinels(self):
