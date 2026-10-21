@@ -154,8 +154,9 @@ void CodexScannerDisplay::SetupUI() {
     // inherited large assistant font. Bound the visual width after scaling.
     const lv_font_t* notice_font = LV_FONT_DEFAULT;
     lv_obj_set_style_text_font(notice_text_, notice_font, 0);
-    const int notice_scale = std::max(1, 14 * 256 / notice_font->line_height);
-    lv_obj_set_size(notice_text_, 208 * 256 / notice_scale, notice_font->line_height);
+    const int notice_height = std::max(1, static_cast<int>(notice_font->line_height));
+    const int notice_scale = std::max(1, 14 * 256 / notice_height);
+    lv_obj_set_size(notice_text_, 208 * 256 / notice_scale, notice_height);
     lv_obj_set_style_transform_pivot_x(notice_text_, 0, 0);
     lv_obj_set_style_transform_pivot_y(notice_text_, 0, 0);
     lv_obj_set_style_transform_scale_x(notice_text_, notice_scale, 0);
