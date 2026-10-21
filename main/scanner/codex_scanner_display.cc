@@ -105,7 +105,16 @@ void CodexScannerDisplay::SetupUI() {
     auto* right = Outline(dashboard_, 122, 44, 112, 126, kYellow, 12);
     Impact(right, "TODAY TOTAL", 6, 6, 100, kPaper);
     tokens_text_ = Impact(right, "--", 2, 38, 106, kPaper, 48, true);
-    Impact(right, "TOKENS", 6, 98, 98, kMuted, 16, true);
+    // Draw an hourglass; no font glyph or RESET label is required.
+    Panel(right, 14, 100, 10, 1, kMuted, 0);
+    Panel(right, 14, 112, 10, 1, kMuted, 0);
+    for (int i = 0; i < 6; ++i) {
+        Panel(right, 14 + i / 2, 101 + i, 1, 1, kMuted, 0);
+        Panel(right, 23 - i / 2, 101 + i, 1, 1, kMuted, 0);
+        Panel(right, 17 - i / 2, 107 + i, 1, 1, kMuted, 0);
+        Panel(right, 20 + i / 2, 107 + i, 1, 1, kMuted, 0);
+    }
+    reset_time_text_ = Impact(right, "--:--", 31, 97, 73, kMuted, 16, true);
 
     auto* state = Outline(dashboard_, 6, 177, 228, 25, kMuted, 7);
     Impact(state, "LAYER", 7, 4, 42, kMuted);
@@ -444,6 +453,8 @@ void CodexScannerDisplay::UpdateMetrics() {
             std::snprintf(text, sizeof(text), "%lld",
                           static_cast<long long>(sample.metrics.tokens));
         CodexDrawSetText(tokens_text_, text);
+        FormatCodexReset(sample.metrics, sample.online, text, sizeof(text));
+        CodexDrawSetText(reset_time_text_, text);
     }
     UpdateMacintosh();
     UpdateKeyboard();

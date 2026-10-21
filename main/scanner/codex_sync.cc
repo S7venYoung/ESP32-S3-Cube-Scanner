@@ -168,6 +168,8 @@ void SyncTask(void*) {
                         Reply("PROSPECTOR-SCANNER/1");
                     else if (line == "CAPS")
                         Reply("CUBE-CODEX/2");
+                    else if (line == "CAPS3")
+                        Reply("CUBE-CODEX/3");
                     else if (line == "PAIR")
                         Reply("CUBE-PAIR " + IpAddress() + " " + token);
 #if CONFIG_CUBE_STUDIO_RPC
@@ -248,6 +250,7 @@ CodexSnapshot GetCodexSnapshot() {
         snapshot.online = true;
         if (sample->metrics.age_seconds + (now - sample->at) / 1000000 > 900) {
             snapshot.metrics.left = snapshot.metrics.week_left = -1;
+            snapshot.metrics.reset_at = -1;
         }
     }
     return snapshot;
