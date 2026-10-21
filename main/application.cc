@@ -439,14 +439,24 @@ void Application::CheckAssetsVersion() {
 }
 
 void Application::CheckNewVersion() {
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    // This endpoint also provisions voice service/activation. Fetch once, but
+    // never run stock firmware checks or an exponential startup retry loop.
+    const int MAX_RETRY = 1;
+#else
     const int MAX_RETRY = 10;
+#endif
     int retry_count = 0;
     int retry_delay = 10;  // Initial retry delay in seconds
 
     auto& board = Board::GetInstance();
     while (true) {
         auto display = board.GetDisplay();
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+        display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+#else
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
+#endif
 
         auto check = ota_->CheckVersion();
         if (!check) {
@@ -489,12 +499,14 @@ void Application::CheckNewVersion() {
         retry_count = 0;
         retry_delay = 10;  // Reset retry delay
 
+#if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
         if (ota_->HasNewVersion()) {
             if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
                 return;  // This line will never be reached after reboot
             }
             // If upgrade failed, continue to normal operation
         }
+#endif
 
         // No new version, mark the current version as valid
         ota_->MarkCurrentVersionValid();

@@ -214,6 +214,11 @@ NetworkResult<> Ota::CheckVersion() {
     }
 
     has_new_version_ = false;
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    // Voice bootstrap is retained, firmware metadata (including force) ignored.
+    firmware_version_.clear();
+    firmware_url_.clear();
+#else
     cJSON *firmware = cJSON_GetObjectItem(root, "firmware");
     if (cJSON_IsObject(firmware)) {
         cJSON *version = cJSON_GetObjectItem(firmware, "version");
@@ -242,6 +247,7 @@ NetworkResult<> Ota::CheckVersion() {
     } else {
         ESP_LOGW(TAG, "No firmware section found!");
     }
+#endif
 #if CONFIG_ZMK_SCANNER_MODE && !CONFIG_CUBE_ALLOW_STOCK_OTA
     // Preserve server activation/configuration but reject stock/forced OTA.
     has_new_version_ = false;
