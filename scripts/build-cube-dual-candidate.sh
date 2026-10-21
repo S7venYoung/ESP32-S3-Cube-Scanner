@@ -13,7 +13,7 @@ g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/runtime_combos_tes
 /tmp/cube-runtime-combos-test
 g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/hold_tap_test.cc -o /tmp/cube-hold-tap-test
 /tmp/cube-hold-tap-test
-for extra in split_relay peripheral_rpc dya_extended runtime_pointer runtime_sensors custom_settings host_os; do
+for extra in split_relay peripheral_rpc dya_extended runtime_pointer runtime_sensors custom_settings host_os host_cycle; do
     g++ -std=c++17 -Wall -Wextra -Werror "experimental/cube_dongle/${extra}_test.cc" -o "/tmp/cube-${extra}-test"
     "/tmp/cube-${extra}-test"
 done

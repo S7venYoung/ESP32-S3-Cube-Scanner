@@ -14,6 +14,7 @@
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>
 #include <atomic>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #if CONFIG_CUBE_STUDIO_RPC
@@ -23,6 +24,7 @@
 #include "cube_studio.h"
 #endif
 #include "../../experimental/cube_dongle/host_control.h"
+#include "../../experimental/cube_dongle/host_cycle.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
@@ -665,8 +667,13 @@ void BeginTransition(HostRequest request) {
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioCancelMacros();
 #endif
-    if (request.command == HostCommand::Next)
-        request = {HostCommand::Select, static_cast<uint8_t>((selected + 1) % 5)};
+    if (request.command == HostCommand::Next) {
+        const bool usb_selected = preference == Output::Usb ||
+                                  (preference == Output::Auto && !routed_ble);
+        const auto slot = cube_dongle::NextHostCycleSlot(usb_selected, selected);
+        request = slot == 0 ? HostRequest{HostCommand::Usb, 0}
+                            : HostRequest{HostCommand::Select, static_cast<uint8_t>(slot - 1)};
+    }
     if (request.command == HostCommand::Select && request.profile == selected &&
         preference == Output::Ble && routed_ble && profiles[selected].bound) {
         last_result = 0;
@@ -823,7 +830,7 @@ namespace {
 void OutputTimer(ble_npl_event*) {
     CubeSplitInputTick();
     CubeDualTick();
-    ble_npl_callout_reset(&output_timer, ble_npl_time_ms_to_ticks32(5));
+    ble_npl_callout_reset(&output_timer, std::max<uint32_t>(1, ble_npl_time_ms_to_ticks32(5)));
 }
 void SubmitBle(const ReportFrame& frame) {
     const bool inhibited = frames.Inhibited();
@@ -842,7 +849,7 @@ void CubeBleHostSync(uint8_t type) {
         ble_npl_callout_init(&output_timer, nimble_port_get_dflt_eventq(), OutputTimer, nullptr);
         timer_initialized = true;
     }
-    ble_npl_callout_reset(&output_timer, ble_npl_time_ms_to_ticks32(5));
+    ble_npl_callout_reset(&output_timer, std::max<uint32_t>(1, ble_npl_time_ms_to_ticks32(5)));
     Advertise();
 }
 void CubeBleHostReset() {
@@ -1084,7 +1091,7 @@ cube_dongle::studio::Bytes CubeBleManagement(const cube_dongle::studio::Bytes& p
                 return wire::CustomError("Host management busy");
             const int64_t deadline = esp_timer_get_time() + 2000000;
             while (done_ticket.load() != ticket && esp_timer_get_time() < deadline)
-                vTaskDelay(pdMS_TO_TICKS(5));
+                vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(5)));
             if (done_ticket.load() != ticket)
                 return wire::CustomError("Host change pending; read profiles before retrying");
             okay = command_result.load() == 0;

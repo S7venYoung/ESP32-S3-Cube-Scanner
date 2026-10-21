@@ -181,7 +181,8 @@ void Worker(void*) {
                 }
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(2));
+        // At 100 Hz, pdMS_TO_TICKS(2) is zero and starves the idle watchdog.
+        vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(2)));
     }
 }
 }  // namespace
@@ -305,7 +306,7 @@ bool CubeCdcWritePacket(const uint8_t* bytes, size_t size, uint32_t expected_epo
         if (rc != ESP_OK && rc != ESP_ERR_TIMEOUT)
             return false;
         if (!queued)
-            vTaskDelay(pdMS_TO_TICKS(2));
+            vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(2)));
     }
     return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(200)) == ESP_OK &&
            cdc_epoch.load() == expected_epoch;

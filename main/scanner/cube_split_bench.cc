@@ -1176,7 +1176,7 @@ bool CubeSplitForgetBonds() {
         return false;
     const int64_t deadline = esp_timer_get_time() + 2000000;
     while (forget_done.load() != ticket && esp_timer_get_time() < deadline)
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(5)));
     return forget_done.load() == ticket && forget_success.load();
 }
 bool CubeSplitIsKeyboard(const uint8_t* address, uint8_t type) {
