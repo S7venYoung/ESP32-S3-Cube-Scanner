@@ -1,4 +1,4 @@
-2026-10-21 User-requested dual dongle rebuild after font macro fix
-Include 9d3021e91a2ae0fb75fdbaccc2edb06a71ea8bc4.
-Build Cube USB+BLE once only, retaining system behaviors, USB cycle and compact notices.
-No USB-only or keyboard-half build, automatic flash, reset or bond erasure.
+2026-10-21 User-requested dual dongle build after font integer-type fix
+Include deef573d31f602447f20cf350f75464080ab4d9c and target-type notice regression tests.
+Build Cube USB+BLE once only. No USB-only or keyboard-half builds.
+No automatic flashing, factory reset or pairing erasure.
