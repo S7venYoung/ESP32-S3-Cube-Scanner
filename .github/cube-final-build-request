@@ -1,5 +1,4 @@
-2026-10-21 User-requested dual dongle build with system behaviors
-Include 9a5b6ddeb834d2436d06fb838c31a7d37ae8dbd2: Bootloader, Studio Unlock, System Reset and USB Output bindings.
-Include compact yellow notice, USB/BLE cycle and reset-cause encoding fixes.
-Build Cube USB+BLE once only. No USB-only or keyboard-half builds.
-No automatic flashing, reset or pairing erasure. Reboot stability still requires hardware validation.
+2026-10-21 User-requested dual dongle rebuild after font macro fix
+Include 9d3021e91a2ae0fb75fdbaccc2edb06a71ea8bc4.
+Build Cube USB+BLE once only, retaining system behaviors, USB cycle and compact notices.
+No USB-only or keyboard-half build, automatic flash, reset or bond erasure.
