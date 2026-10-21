@@ -1,4 +1,5 @@
-2026-10-21 User-requested dual dongle stability build
-Include positive tick delays and USB host-cycle slot from 14bbc60def3d479349a2610c6c8145f1df815ff9.
-Build Cube USB+BLE once only; do not build USB-only or keyboard halves.
-No automatic USB fallback, flashing, pairing reset or watchdog disabling.
+2026-10-21 User-requested dual dongle build with system behaviors
+Include 9a5b6ddeb834d2436d06fb838c31a7d37ae8dbd2: Bootloader, Studio Unlock, System Reset and USB Output bindings.
+Include compact yellow notice, USB/BLE cycle and reset-cause encoding fixes.
+Build Cube USB+BLE once only. No USB-only or keyboard-half builds.
+No automatic flashing, reset or pairing erasure. Reboot stability still requires hardware validation.
