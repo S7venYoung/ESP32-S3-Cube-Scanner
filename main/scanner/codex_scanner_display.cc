@@ -148,9 +148,18 @@ void CodexScannerDisplay::SetupUI() {
     lv_obj_add_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
 
     // Native setup/activation notices and hardware alarms remain above it.
-    notice_panel_ = Panel(dashboard_, 8, 181, 224, 51, kYellow);
-    notice_text_ = Text(notice_panel_, "", 7, 5, 210, kInk);
-    lv_obj_set_height(notice_text_, 43);
+    notice_panel_ = Panel(dashboard_, 8, 208, 224, 24, kYellow);
+    notice_text_ = Text(notice_panel_, "", 8, 5, 208, kInk);
+    // Use the existing Unicode font at a 14 px visual line height, not the
+    // inherited large assistant font. Bound the visual width after scaling.
+    lv_obj_set_style_text_font(notice_text_, LV_FONT_DEFAULT, 0);
+    const int notice_scale = std::max(1, 14 * 256 / LV_FONT_DEFAULT->line_height);
+    lv_obj_set_size(notice_text_, 208 * 256 / notice_scale, LV_FONT_DEFAULT->line_height);
+    lv_obj_set_style_transform_pivot_x(notice_text_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(notice_text_, 0, 0);
+    lv_obj_set_style_transform_scale_x(notice_text_, notice_scale, 0);
+    lv_obj_set_style_transform_scale_y(notice_text_, notice_scale, 0);
+    lv_label_set_long_mode(notice_text_, LV_LABEL_LONG_DOT);
     lv_obj_add_flag(notice_panel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(low_battery_popup_);
     high_temp_popup_ = Panel(lv_screen_active(), 8, 184, 224, 48, kRed, 10);
