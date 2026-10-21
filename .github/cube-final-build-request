@@ -1,4 +1,4 @@
-2026-10-21 User-requested Cube USB+BLE dongle build
-Include DYA confirmed-progress deadline fix 66271a71059f80f065d3ab6814b40fa253ab8afc.
-Build Cube USB+BLE once only. Do not build USB-only or keyboard halves.
-Do not flash hardware or clear bindings.
+2026-10-21 User-requested dual dongle rebuild
+Include live keyboard display binding 605bdaad and disabled stock OTA checks 3aec4f78.
+Build Cube USB+BLE once only; no USB-only or keyboard-half builds.
+Do not flash hardware or erase settings.
