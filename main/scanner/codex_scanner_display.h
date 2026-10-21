@@ -31,6 +31,16 @@ protected:
 private:
     void UpdateAssistantOverlay();  // Caller holds the LVGL lock.
     void UpdateMetrics();
+    void UpdateKeyboard();  // Caller holds the LVGL lock; snapshots are thread-safe.
+    lv_obj_t* keyboard_layer_ = nullptr;
+    lv_obj_t* keyboard_wpm_ = nullptr;
+    lv_obj_t* keyboard_battery_[2] = {};
+    lv_obj_t* keyboard_battery_fill_[2] = {};
+    lv_obj_t* mac_layer_ = nullptr;
+    lv_obj_t* mac_keyboard_battery_[2] = {};
+    lv_obj_t* mac_keyboard_fill_[2] = {};
+    lv_obj_t* mac_profile_ = nullptr;
+    lv_obj_t* mac_link_ = nullptr;
     void SetupMacintosh();
     void UpdateMacintosh();
     bool mac_theme_ = false;

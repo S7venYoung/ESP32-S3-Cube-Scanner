@@ -7,6 +7,7 @@
 #include "codex_metrics.h"
 #include "dashboard_command.h"
 #include "macintosh_theme.h"
+#include "keyboard_status.h"
 #include "white_theme.h"
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
 #include "bluetooth_voice.h"
@@ -108,16 +109,18 @@ void CodexScannerDisplay::SetupUI() {
 
     auto* state = Outline(dashboard_, 6, 177, 228, 25, kMuted, 7);
     Impact(state, "LAYER", 7, 4, 42, kMuted);
-    Impact(state, "--", 52, 2, 55, kYellow, 20);
+    keyboard_layer_ = Impact(state, "--", 52, 2, 55, kYellow, 20);
     Panel(state, 118, 4, 1, 16, kMuted, 0);
     Impact(state, "WPM", 132, 4, 35, kMuted);
-    Impact(state, "--", 177, 2, 40, kYellow, 20);
+    keyboard_wpm_ = Impact(state, "--", 177, 2, 40, kYellow, 20);
     for (int i = 0; i < 2; ++i) {
         auto* battery =
             Outline(dashboard_, i == 0 ? 6 : 122, 208, i == 0 ? 110 : 112, 26, kMuted, 7);
         Impact(battery, i == 0 ? "L" : "R", 7, 4, 13, kMuted);
-        Impact(battery, "--%", 24, 4, 35, kPaper);
+        keyboard_battery_[i] = Impact(battery, "--%", 24, 4, 35, kPaper);
         Outline(battery, 66, 8, 33, 10, kMuted, 2);
+        keyboard_battery_fill_[i] = Panel(battery, 68, 10, 29, 6, kGreen, 0);
+        lv_obj_add_flag(keyboard_battery_fill_[i], LV_OBJ_FLAG_HIDDEN);
         Panel(battery, 99, 11, 2, 4, kMuted, 0);
     }
 
@@ -250,14 +253,16 @@ void CodexScannerDisplay::SetupMacintosh() {
         Panel(kb, 4, 23, 40, 1, kMacInk, 0);
         rect(kb, 8, 31, 30, 15);
         Panel(kb, 38, 36, 2, 5, kMacInk, 0);
-        MacintoshText(kb, "--%", 4, 53, 40, 1, true);
+        mac_keyboard_battery_[i] = MacintoshText(kb, "--%", 4, 53, 40, 1, true);
+        mac_keyboard_fill_[i] = Panel(kb, 10, 33, 26, 11, kMacInk, 0);
+        lv_obj_add_flag(mac_keyboard_fill_[i], LV_OBJ_FLAG_HIDDEN);
     }
     auto* monitor = card(65, 34, 108, 77);
     for (int y = 4; y < 12; y += 3)
         Panel(monitor, 4, y, 100, 1, kMacInk, 0);
     rect(monitor, 3, 15, 102, 58);
     MacintoshText(monitor, "LAYER", 8, 22, 92, 1, true);
-    MacintoshText(monitor, "--", 8, 38, 92, 4, true);
+    mac_layer_ = MacintoshText(monitor, "--", 8, 38, 92, 4, true);
     for (int i = 0; i < 4; ++i) {
         auto* key = rect(mac_dashboard_, 65 + i * 28, 120, 24, 27);
         // Draw Mac symbols: Control ⌃ / Option ⌥ / Command ⌘ / Shift ⇧.
@@ -266,9 +271,9 @@ void CodexScannerDisplay::SetupMacintosh() {
         mac_modifier_symbols_[i] = MacintoshText(key, symbols[i], 2, 6, 20, 2, true);
     }
     auto* radio = card(8, 152, 74, 48);
-    MacintoshText(radio, "CH --", 5, 7, 64, 1);
+    mac_profile_ = MacintoshText(radio, "CH --", 5, 7, 64, 1);
     Panel(radio, 4, 20, 66, 1, kMacInk, 0);
-    MacintoshText(radio, "BLE --", 5, 28, 64, 1);
+    mac_link_ = MacintoshText(radio, "BLE --", 5, 28, 64, 1);
     auto* wpm = card(158, 152, 74, 48);
     MacintoshText(wpm, "L/R WPM", 5, 7, 64, 1);
     Panel(wpm, 4, 20, 66, 1, kMacInk, 0);
@@ -430,8 +435,62 @@ void CodexScannerDisplay::UpdateMetrics() {
         CodexDrawSetText(tokens_text_, text);
     }
     UpdateMacintosh();
+    UpdateKeyboard();
     ArcadeRefresh(arcade_dashboard_);
     WhiteRefresh(white_dashboard_);
+}
+
+void CodexScannerDisplay::UpdateKeyboard() {
+    const auto kb = GetKeyboardStatus();
+    const auto fight = GetFightTelemetry();
+    char text[32];
+    CodexDrawSetText(keyboard_layer_, kb.online && kb.layer[0] ? kb.layer : "--");
+    if (kb.online && kb.wpm >= 0)
+        std::snprintf(text, sizeof(text), "%d", kb.wpm);
+    else
+        std::snprintf(text, sizeof(text), "--");
+    CodexDrawSetText(keyboard_wpm_, text);
+    if (mac_layer_)
+        MacintoshSetText(mac_layer_, kb.online && kb.layer[0] ? kb.layer : "--");
+    if (mac_profile_) {
+        if (kb.online && kb.profile > 0)
+            std::snprintf(text, sizeof(text), "CH %d", kb.profile);
+        else
+            std::snprintf(text, sizeof(text), "CH --");
+        MacintoshSetText(mac_profile_, text);
+        MacintoshSetText(mac_link_, kb.online ? (kb.usb ? "USB" : kb.ble ? "BLE" : "OFF") : "--");
+    }
+    const uint8_t modifiers = kb.online ? kb.modifiers : fight.online ? fight.modifiers : 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!mac_modifier_keys_[i])
+            continue;
+        const bool pressed = (modifiers & (1u << i)) != 0;
+        lv_obj_set_style_bg_color(mac_modifier_keys_[i], lv_color_hex(pressed ? kMacInk : kMacPaper), 0);
+        MacintoshSetInverted(mac_modifier_symbols_[i], pressed);
+    }
+    const int levels[] = {kb.online ? kb.left_battery : -1, kb.online ? kb.right_battery : -1};
+    for (int i = 0; i < 2; ++i) {
+        const int level = levels[i];
+        const bool known = level >= 0 && level <= 100;
+        if (known)
+            std::snprintf(text, sizeof(text), "%d%%", level);
+        else
+            std::snprintf(text, sizeof(text), "--%%");
+        CodexDrawSetText(keyboard_battery_[i], text);
+        if (mac_keyboard_battery_[i])
+            MacintoshSetText(mac_keyboard_battery_[i], text);
+        for (int theme = 0; theme < 2; ++theme) {
+            auto* fill = theme ? mac_keyboard_fill_[i] : keyboard_battery_fill_[i];
+            if (!fill)
+                continue;
+            if (!known || level == 0)
+                lv_obj_add_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            else {
+                lv_obj_set_width(fill, std::max(1, (level * (theme ? 26 : 29) + 99) / 100));
+                lv_obj_remove_flag(fill, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
 }
 
 void CodexScannerDisplay::UpdateAssistantOverlay() {
