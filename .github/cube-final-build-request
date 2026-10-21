@@ -1,4 +1,4 @@
-2026-10-21 User-requested dual dongle rebuild
-Include live keyboard display binding 605bdaad and disabled stock OTA checks 3aec4f78.
-Build Cube USB+BLE once only; no USB-only or keyboard-half builds.
-Do not flash hardware or erase settings.
+2026-10-21 User-requested dual dongle stability build
+Include positive tick delays and USB host-cycle slot from 14bbc60def3d479349a2610c6c8145f1df815ff9.
+Build Cube USB+BLE once only; do not build USB-only or keyboard halves.
+No automatic USB fallback, flashing, pairing reset or watchdog disabling.
