@@ -43,7 +43,7 @@ std::atomic<bool> studio_ready{false};
 std::atomic<uint32_t> studio_epoch{1};
 uint16_t studio_handle = 0;
 bool studio_subscribed = false;
-int64_t studio_inflight_since = 0;
+cube_dongle::studio::ProgressDeadline studio_progress;
 #endif
 struct Profile {
     bool bound = false;
@@ -115,7 +115,7 @@ void StudioReset() {
     studio_ready = false;
     const uint32_t epoch = studio_epoch.fetch_add(1) + 1;
     studio_pipe.Reset(epoch);
-    studio_inflight_since = 0;
+    studio_progress.Reset();
 }
 void StudioPublish() {
     const bool ready = authorized && Encrypted() && studio_subscribed && !transition;
@@ -132,24 +132,27 @@ void StudioPump() {
     {
         std::lock_guard<std::mutex> lock(studio_mutex);
         if (studio_pipe.Pending()) {
-            timed_out = esp_timer_get_time() - studio_inflight_since > 5000000;
+            timed_out = studio_progress.Expired(esp_timer_get_time());
         } else {
             size = studio_pipe.Next(bytes, ble_att_mtu(connection));
             if (size)
-                studio_inflight_since = esp_timer_get_time();
+                timed_out = studio_progress.Expired(esp_timer_get_time());
         }
     }
-    if (timed_out)
+    if (timed_out) {
         ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+        return;
+    }
     if (!size)
         return;
     auto* mbuf = ble_hs_mbuf_from_flat(bytes, size);
     const int rc =
         mbuf ? ble_gatts_indicate_custom(connection, studio_handle, mbuf) : BLE_HS_ENOMEM;
-    if (rc) {
+    if (rc == BLE_HS_EBUSY || rc == BLE_HS_EAGAIN || rc == BLE_HS_ENOMEM) {
         std::lock_guard<std::mutex> lock(studio_mutex);
         studio_pipe.Retry();
-    }
+    } else if (rc)
+        ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
 }
 int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
     if (security_pending && conn == connection)
@@ -437,6 +440,7 @@ int Gap(ble_gap_event* event, void* arg) {
         if (event->notify_tx.status == BLE_HS_EDONE) {
             std::lock_guard<std::mutex> lock(studio_mutex);
             studio_pipe.Confirm();
+            studio_progress.Reset();
         } else if (event->notify_tx.status != 0)
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     }

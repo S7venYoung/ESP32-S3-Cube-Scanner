@@ -6,6 +6,24 @@
 #include <vector>
 
 namespace cube_dongle::studio {
+// A send failure is still lack of progress. Keep the same deadline across
+// transient submission failures and waiting for ATT confirmation.
+class ProgressDeadline {
+public:
+    void Reset() { active_ = false; }
+    bool Expired(int64_t now) {
+        if (!active_) {
+            active_ = true;
+            since_ = now;
+        }
+        return now - since_ >= 5000000;
+    }
+
+private:
+    bool active_ = false;
+    int64_t since_ = 0;
+};
+
 // Serialize external access with the adapter's mutex; host callbacks never wait
 // for a UI response or perform flash writes. Indications advance only on ACK.
 class BlePipe {

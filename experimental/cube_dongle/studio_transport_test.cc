@@ -2,6 +2,14 @@
 #include <cassert>
 
 int main() {
+    cube_dongle::studio::ProgressDeadline deadline;
+    assert(!deadline.Expired(0));
+    assert(!deadline.Expired(4999999));
+    assert(deadline.Expired(5000000));
+    deadline.Reset();
+    assert(!deadline.Expired(6000000));
+    assert(!deadline.Expired(10999999));
+    assert(deadline.Expired(11000000));
     cube_dongle::studio::BlePipe pipe;
     pipe.Reset(7);
     uint8_t bytes[512]{};
@@ -14,6 +22,15 @@ int main() {
     assert(pipe.Next(out, 23) == 0);
     pipe.Retry();
     assert(pipe.Next(out, 23) == 20 && out[0] == 0);
+    // Retrying a chunk must not reset the adapter's progress timeout.
+    deadline.Reset();
+    assert(!deadline.Expired(12000000));
+    for (int64_t now = 13000000; now < 17000000; now += 1000000) {
+        pipe.Retry();
+        assert(pipe.Next(out, 23) == 20 && out[0] == 0);
+        assert(!deadline.Expired(now));
+    }
+    assert(deadline.Expired(17000000));
     pipe.Confirm();
     assert(pipe.Next(out, 185) == 182 && out[0] == 20);
     pipe.Reset(8);
