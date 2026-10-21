@@ -207,7 +207,9 @@ wire::Bytes DeviceInfo(const wire::Bytes& payload, bool) {
         std::snprintf(build_hash + i * 2, 3, "%02x", app->app_elf_sha256[i]);
     wire::Text(build, 10, build_hash);
     wire::Text(hardware, 1, rpc.serial);
-    wire::Number(hardware, 2, esp_reset_reason());
+    // DYA expects Zephyr reset-cause bits, not the ESP-IDF enum ordinal.
+    // ESP_RST_TASK_WDT == 6 otherwise decodes as software (2) + brownout (4).
+    wire::Number(hardware, 2, ResetBits());
     uint32_t flash_size = 0;
     if (esp_flash_get_size(nullptr, &flash_size) == ESP_OK)
         wire::Number(hardware, 3, flash_size / 1024);
