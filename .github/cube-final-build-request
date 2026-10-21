@@ -1,4 +1,4 @@
-2026-10-21 User-requested dual dongle build after font integer-type fix
-Include deef573d31f602447f20cf350f75464080ab4d9c and target-type notice regression tests.
-Build Cube USB+BLE once only. No USB-only or keyboard-half builds.
-No automatic flashing, factory reset or pairing erasure.
+2026-10-21 User requested dongle and companion reset-time build
+Build dual Cube with 4bd16bb1af7447ed66ef7220ceb97d392f18f779 (CODEX3 reset timestamp and hourglass).
+Cube USB+BLE once only; no scanner, USB-only or keyboard-half builds.
+No automatic flash, pairing erasure or release replacement.
