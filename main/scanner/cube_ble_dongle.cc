@@ -1,4 +1,5 @@
 #include "cube_ble_dongle.h"
+#include "application.h"
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -56,6 +57,9 @@ unsigned selected = 0;
 enum class Output { Auto, Usb, Ble };
 Output preference = Output::Auto;
 bool routed_ble = false, enabled = true, configured = false, synced = false;
+unsigned pending_system = 0;  // 1: ROM download, 2: reboot. Not factory reset.
+bool system_old_ble = false;
+int64_t system_started = 0;
 bool authorized = false, suspended = false, keyboard_sub = false, media_sub = false,
      boot_sub = false, pointer_sub = false;
 bool security_pending = false;
@@ -889,7 +893,25 @@ void CubeDualTick() {
         ((!authorized && esp_timer_get_time() >= security_deadline) ||
          (inflight && esp_timer_get_time() - inflight_since > 3000000)))
         ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
-    if (!transition) {
+    if (pending_system) {
+        const bool released = system_old_ble
+            ? (connection == BLE_HS_CONN_HANDLE_NONE || neutral_sent)
+            : (!CubeUsbAttached() || CubeUsbNeutralDelivered());
+        if (physical_neutral && released) {
+            const auto action = pending_system;
+            pending_system = 0;
+            Application::GetInstance().Schedule([action]() {
+                if (action == 1)
+                    CubeUsbEnterDownload();
+                else
+                    Application::GetInstance().Reboot();
+            });
+        } else if (esp_timer_get_time() - system_started > 3000000) {
+            pending_system = 0;
+            ESP_LOGW(kTag, "System key cancelled: release keyboard and ensure host accepts neutral");
+        }
+    }
+    if (!transition && !pending_system) {
         const auto request = mailbox.exchange(0);
         if (request) {
             pending_ticket = request >> 16;
@@ -941,6 +963,19 @@ void CubeDualSubmit(const ReportFrame& frame, uint16_t actions) {
     physical_input.pointer = pointer;
     // Actual physical-neutral status is supplied separately, including layer keys.
     if (actions) {
+#if CONFIG_CUBE_STUDIO_RPC
+        if (actions & (1u << 9))
+            CubeStudioUnlockUsb();
+#endif
+        if (!transition && !pending_system && (actions & ((1u << 8) | (1u << 10)))) {
+            pending_system = (actions & (1u << 8)) ? 1 : 2;
+            system_old_ble = routed_ble;
+            system_started = esp_timer_get_time();
+            CubeDualRequireNeutral();
+#if CONFIG_CUBE_STUDIO_RPC
+            CubeStudioCancelMacros();
+#endif
+        }
         HostRequest request;
         for (unsigned i = 0; i < 5; ++i)
             if (actions & (1u << i))
@@ -949,6 +984,8 @@ void CubeDualSubmit(const ReportFrame& frame, uint16_t actions) {
             request = {HostCommand::Clear, 0};
         if (actions & 64)
             request = {HostCommand::ClearAll, 0};
+        if (actions & 128)
+            request = {HostCommand::Usb, 0};
         uint32_t expected = 0;
         const uint32_t ticket = (next_ticket.fetch_add(1) % 65535) + 1;
         if (request.command != HostCommand::None &&

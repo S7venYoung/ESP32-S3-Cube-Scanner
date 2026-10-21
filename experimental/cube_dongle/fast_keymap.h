@@ -21,7 +21,8 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
     auto equal = [](const Binding& a, const Binding& b) {
         return a.kind == b.kind && a.value == b.value && a.modifiers == b.modifiers;
     };
-    const char* aliases[] = {"", "kp", "mo", "trans", "none", "bt", "runtime_macro", "mt", "lt"};
+    const char* aliases[] = {"", "kp", "mo", "trans", "none", "bt", "runtime_macro", "mt", "lt",
+                             "bootloader", "studio_unlock", "sys_reset", "out"};
     auto details = [&](unsigned id, bool alias, bool exclude_name) {
         const auto official = Rpc::BehaviorDetails(id);
         Reader source(official.data(), official.size(), {3});
@@ -58,14 +59,14 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
     Reader args(op->data, op->size, {1});
     if (op->tag == 1 && op->wire == 0) {
         Bytes behaviors;
-        for (unsigned id = 1; id <= 8; ++id)
+        for (unsigned id = 1; id <= kLastBehavior; ++id)
             Message(behaviors, id, details(id, true, false));
         Number(body, 1, 1);
         Number(body, 2, hash(behaviors));
         Number(body, 3, hash(stock.Export()));
         Number(body, 4, hash(model.Export()));
         Number(body, 5, hash(physical));
-        Number(body, 6, 8);
+        Number(body, 6, kLastBehavior);
         Number(body, 7, 16);
         Number(body, 8, 4);
         Number(body, 9, 0);
@@ -145,10 +146,12 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
         if (op->tag == 2) {
             if (args.Value(1) > 2)
                 return error(0);
-            selected = {1, 2, 3, 4, 5, 6, 7, 8};
+            selected.clear();
+            for (uint32_t id = 1; id <= kLastBehavior; ++id)
+                selected.push_back(id);
         }
         for (const auto id : selected)
-            if (id >= 1 && id <= 8) {
+            if (id >= 1 && id <= kLastBehavior) {
                 Bytes entry;
                 Number(entry, 1, id);
                 if (op->tag == 2)

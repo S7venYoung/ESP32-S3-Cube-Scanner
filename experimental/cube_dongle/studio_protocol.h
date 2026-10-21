@@ -209,6 +209,8 @@ private:
 constexpr uint32_t kKp = 1, kMo = 2, kTransparent = 3, kNone = 4, kBt = 5;
 constexpr uint32_t kRuntimeMacro = 6;
 constexpr uint32_t kModTap = 7, kLayerTap = 8;
+constexpr uint32_t kBootloader = 9, kStudioUnlock = 10, kSystemReset = 11, kUsbOutput = 12;
+constexpr uint32_t kLastBehavior = kUsbOutput;
 inline uint32_t Behavior(const Binding& b) {
     switch (b.kind) {
         case Kind::Key:
@@ -219,7 +221,8 @@ inline uint32_t Behavior(const Binding& b) {
         case Kind::Transparent:
             return kTransparent;
         case Kind::HostAction:
-            return kBt;
+            return b.value == 7 ? kUsbOutput : b.value == 8 ? kBootloader
+                   : b.value == 9 ? kStudioUnlock : b.value == 10 ? kSystemReset : kBt;
         case Kind::RuntimeMacro:
             return kRuntimeMacro;
         case Kind::ModTap:
@@ -240,7 +243,7 @@ inline uint32_t Param1(const Binding& b) {
         case Kind::RuntimeMacro:
             return b.value;
         case Kind::HostAction:
-            return b.value < 5 ? 3 : b.value == 5 ? 0 : 4;
+            return b.value >= 7 ? 0 : b.value < 5 ? 3 : b.value == 5 ? 0 : 4;
         case Kind::ModTap:
             return 0x70000 | (b.value >> 8);
         case Kind::LayerTap:
@@ -292,6 +295,10 @@ inline bool BindingFromWire(uint64_t encoded_id, uint64_t p1, uint64_t p2, Bindi
             out = {Kind::LayerTap, uint16_t((p1 << 8) | tap.value), tap.modifiers};
             return true;
         }
+    } else if (id >= kBootloader && id <= kUsbOutput && !p1 && !p2) {
+        const uint16_t action = id == kUsbOutput ? 7 : id == kBootloader ? 8 : id == kStudioUnlock ? 9 : 10;
+        out = {Kind::HostAction, action, 0};
+        return true;
     } else if (id == kBt) {
         if (p1 == 3 && p2 < 5) {
             out = {Kind::HostAction, uint16_t(p2), 0};
@@ -480,7 +487,7 @@ public:
         return saved;
     }
     bool LoadSavedModel(Model& saved) const { return saved.Load(saved_); }
-    static Bytes BehaviorDetails(uint32_t id) { return id >= 1 && id <= 8 ? Details(id) : Bytes{}; }
+    static Bytes BehaviorDetails(uint32_t id) { return id >= 1 && id <= kLastBehavior ? Details(id) : Bytes{}; }
     Bytes LockState(bool value) {
         unlocked_ = value;
         Bytes core;
@@ -570,7 +577,7 @@ public:
         } else if (subsystem->tag == 4) {
             if (op->tag == 1 && op->wire == 0) {
                 Bytes list;
-                for (uint32_t b = 1; b <= 8; ++b)
+                for (uint32_t b = 1; b <= kLastBehavior; ++b)
                     Number(list, 1, b);
                 Message(reply, 1, list);
             } else if (op->tag == 2 && op->wire == 2) {
@@ -749,7 +756,8 @@ private:
                                "Bluetooth",
                                "Runtime Macro",
                                "Mod Tap (hold-preferred)",
-                               "Layer Tap (hold-preferred)"};
+                               "Layer Tap (hold-preferred)",
+                               "Bootloader", "Studio Unlock", "System Reset", "USB Output"};
         Text(out, 2, names[id]);
         if (id == kKp) {
             Bytes set;
