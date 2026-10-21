@@ -1,0 +1,3 @@
+2026-10-21 User requested scanner branch GitHub Release.
+Reuse successful scanner run 39211202301 at db265bc4, do not rebuild.
+Publish separately from dongle firmware with explicit mode and flashing notes.

@@ -1,0 +1,52 @@
+name: Publish existing Cube scanner build
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/nologo-xingzhi-cube-154]
+    paths: [.github/cube-scanner-release-request]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Verify and download successful scanner build
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/39211202301" > run.json
+          jq -e '.conclusion == "success" and .head_sha == "db265bc440d7bf5c84feaf097a5d7d1abe995d5e" and .head_branch == "codex/nologo-xingzhi-cube-154"' run.json
+          gh run download 39211202301 --name Nologo-Xingzhi-154-Codex-v2.5.0-firmware --dir firmware
+          test -f firmware/merged-binary.bin
+          test -f firmware/xingzhi_cube_154_wifi_codex.bin
+          (cd firmware && sha256sum -c SHA256SUMS)
+      - name: Publish scanner firmware without rebuilding
+        run: |
+          set -euo pipefail
+          mkdir release
+          (cd firmware && zip -qr ../release/Xingzhi-Cube-Scanner-2026.10.21.zip .)
+          cp firmware/merged-binary.bin release/
+          cp firmware/xingzhi_cube_154_wifi_codex.bin release/
+          (cd release && sha256sum *.bin *.zip > SHA256SUMS)
+          cat > notes.md <<'NOTES'
+          星智 Cube 1.54 TFT Wi-Fi 扫描仪版，来源 codex/nologo-xingzhi-cube-154。
+
+          **这是扫描仪固件，不是 USB/BLE 键盘 dongle，不能代替分体键盘 central。** 保留小智、Codex/Macintosh/格斗/白色主题，以及 USB/Wi-Fi 配套同步。
+
+          本发布直接复用该分支最新成功构建（2026-10-19），未重新编译：
+          https://github.com/S7venYoung/ESP32-S3-Cube-Scanner/actions/runs/39211202301
+          源码固定为 db265bc440d7bf5c84feaf097a5d7d1abe995d5e。
+
+          ZIP 包含完整镜像、应用、资源、分区和 FLASHING.md，刷写请以包内说明为准。
+          merged-binary.bin 是完整镜像；xingzhi_cube_154_wifi_codex.bin 仅为应用镜像，不能从 0x0 当完整镜像刷入。不要默认清除全部 Flash 或配对数据。
+
+          未宣称新增实机验证。此包不包含后续 dongle 分支的系统行为、USB 档位、黄色提示条或诊断修复，也不包含 macOS 配套程序。标记为预发布，不将构建成功等同稳定性保证。
+          NOTES
+          gh release create cube-scanner-2026.10.21 release/* \
+            --target db265bc440d7bf5c84feaf097a5d7d1abe995d5e \
+            --title "Xingzhi Cube Scanner · 2026.10.21" \
+            --prerelease --notes-file notes.md
