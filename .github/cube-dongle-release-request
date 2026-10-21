@@ -1,0 +1,3 @@
+2026-10-21 User requested dongle GitHub Release.
+Publish existing successful dual build 39571889475, source b6406c5b.
+Do not rebuild firmware. Mark prerelease with watchdog stability warning.
