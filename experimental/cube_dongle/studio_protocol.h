@@ -592,7 +592,7 @@ public:
                 if (!detail.valid || !detail.Numbers({1}))
                     return Error(id, 3);
                 auto b = detail.Value(1);
-                if (b < 1 || b > 8)
+                if (b < 1 || b > kLastBehavior)
                     return Error(id, 2);
                 Message(reply, 2, Details(b));
             } else

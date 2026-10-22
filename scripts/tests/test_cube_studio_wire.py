@@ -96,6 +96,21 @@ class StudioWireTest(unittest.TestCase):
         self.assertEqual([len(layer.bindings) for layer in keymap.layers], [61]*3)
         self.assertEqual(keymap.available_layers, 4)
 
+    def test_every_advertised_behavior_has_details(self):
+        # The standalone Tap Dance editor abandons the whole dropdown if any
+        # get_behavior_details request fails, including built-ins after ID 8.
+        ids = self.call('behaviors', 'list_all_behaviors').behaviors.list_all_behaviors.behaviors
+        self.assertTrue(ids)
+        for behavior_id in ids:
+            with self.subTest(behavior_id=behavior_id):
+                reply = self.call('behaviors', 'get_behavior_details', {'behavior_id': behavior_id})
+                details = reply.behaviors.get_behavior_details
+                self.assertEqual(details.id, behavior_id)
+                self.assertTrue(details.display_name)
+        for invalid in (0, max(ids) + 1, 0xffffffff):
+            reply = self.call('behaviors', 'get_behavior_details', {'behavior_id': invalid})
+            self.assertTrue(reply.HasField('meta'))
+
     def test_unlock_edit_save_and_reload(self):
         self.assertEqual(self.set_key().meta.simple_error, 1)
         self.assertEqual(self.exchange('unlock').notification.core.lock_state_changed, 1)
