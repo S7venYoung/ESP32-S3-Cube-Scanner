@@ -111,6 +111,18 @@ class StudioWireTest(unittest.TestCase):
             reply = self.call('behaviors', 'get_behavior_details', {'behavior_id': invalid})
             self.assertTrue(reply.HasField('meta'))
 
+    def test_behavior_names_and_parameter_labels(self):
+        expected = ['', 'Key Press', 'Momentary Layer', 'Transparent', 'None',
+                    'Bluetooth', 'Macro', 'Mod-Tap', 'Layer-Tap', 'Bootloader',
+                    'Studio Unlock', 'Reset', 'USB Output', 'Tap Dance']
+        for behavior_id, name in enumerate(expected[1:], 1):
+            details = self.call('behaviors', 'get_behavior_details', {'behavior_id': behavior_id}).behaviors.get_behavior_details
+            self.assertEqual(details.display_name, name)
+            for group in details.metadata:
+                for param in list(group.param1) + list(group.param2):
+                    if param.WhichOneof('value_type') != 'nil':
+                        self.assertTrue(param.name)
+
     def test_unlock_edit_save_and_reload(self):
         self.assertEqual(self.set_key().meta.simple_error, 1)
         self.assertEqual(self.exchange('unlock').notification.core.lock_state_changed, 1)

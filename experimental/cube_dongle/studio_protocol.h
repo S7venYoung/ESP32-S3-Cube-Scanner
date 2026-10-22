@@ -755,26 +755,17 @@ private:
     static Bytes Details(uint32_t id) {
         Bytes out;
         Number(out, 1, id);
-        const char* names[] = {"",
-                               "Key Press",
-                               "Momentary Layer",
-                               "Transparent",
-                               "None",
-                               "Bluetooth",
-                               "Runtime Macro",
-                               "Mod Tap (hold-preferred)",
-                               "Layer Tap (hold-preferred)",
-                               "Bootloader",
-                               "Studio Unlock",
-                               "System Reset",
-                               "USB Output",
-                               "Runtime Tap Dance"};
+        const char* names[] = {"",           "Key Press",  "Momentary Layer", "Transparent",
+                               "None",       "Bluetooth",  "Macro",           "Mod-Tap",
+                               "Layer-Tap",  "Bootloader", "Studio Unlock",   "Reset",
+                               "USB Output", "Tap Dance"};
         Text(out, 2, names[id]);
         if (id == kKp) {
             Bytes set;
             Bytes usage, hid;
             Number(hid, 1, 0xe7);
             Number(hid, 2, 0);
+            Text(usage, 1, "Key");
             Message(usage, 5, hid);
             Message(set, 1, usage);
             for (auto v : {0xe9u, 0xeau, 0xe2u}) {
@@ -788,9 +779,10 @@ private:
             Bytes set, hold, tap, hid;
             const char* modifier_names[] = {"Left Ctrl",  "Left Shift",  "Left Alt",  "Left GUI",
                                             "Right Ctrl", "Right Shift", "Right Alt", "Right GUI"};
-            if (id == kLayerTap)
+            if (id == kLayerTap) {
+                Text(hold, 1, "Layer");
                 Message(hold, 6, {});
-            else {
+            } else {
                 for (uint32_t usage = 0xe0; usage <= 0xe7; ++usage) {
                     Bytes modifier;
                     Number(modifier, 3, 0x70000 | usage);
@@ -802,6 +794,7 @@ private:
                 Message(set, 1, hold);
             Number(hid, 1, 0xdf);
             Number(hid, 2, 0);
+            Text(tap, 1, "Key");
             Message(tap, 5, hid);
             Message(set, 2, tap);
             Message(out, 3, set);
@@ -809,11 +802,13 @@ private:
             Bytes set, slot, range;
             Number(range, 1, 0);
             Number(range, 2, id == kRuntimeTapDance ? UINT16_MAX : 7);
+            Text(slot, 1, id == kRuntimeTapDance ? "Tap Dance" : "Macro");
             Message(slot, 4, range);
             Message(set, 1, slot);
             Message(out, 3, set);
         } else if (id == kMo) {
             Bytes set, layer;
+            Text(layer, 1, "Layer");
             Message(layer, 6, {});
             Message(set, 1, layer);
             Message(out, 3, set);
@@ -821,12 +816,16 @@ private:
             for (auto command : {3u, 0u, 4u}) {
                 Bytes set, p1, p2;
                 Number(p1, 3, command);
-                Text(p1, 1, command == 3 ? "BT_SEL" : command == 0 ? "BT_CLR" : "BT_CLR_ALL");
+                Text(p1, 1,
+                     command == 3   ? "Select Profile"
+                     : command == 0 ? "Clear Selected Profile"
+                                    : "Clear All Profiles");
                 Message(set, 1, p1);
                 if (command == 3) {
                     Bytes range;
                     Number(range, 1, 0);
                     Number(range, 2, 4);
+                    Text(p2, 1, "Profile");
                     Message(p2, 4, range);
                 } else
                     Message(p2, 2, {});
