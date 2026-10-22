@@ -22,3 +22,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Runtime Tap Dance schema reference (API v2):
+https://github.com/cormoran/zmk-feature-runtime-tapdance/tree/3ed2c36ed94b16601eeba2ed39a27cc93e9a53ee
+The vendored runtime_tapdance.proto preserves the upstream wire field definitions.

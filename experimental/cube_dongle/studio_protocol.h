@@ -210,7 +210,8 @@ constexpr uint32_t kKp = 1, kMo = 2, kTransparent = 3, kNone = 4, kBt = 5;
 constexpr uint32_t kRuntimeMacro = 6;
 constexpr uint32_t kModTap = 7, kLayerTap = 8;
 constexpr uint32_t kBootloader = 9, kStudioUnlock = 10, kSystemReset = 11, kUsbOutput = 12;
-constexpr uint32_t kLastBehavior = kUsbOutput;
+constexpr uint32_t kRuntimeTapDance = 13;
+constexpr uint32_t kLastBehavior = kRuntimeTapDance;
 inline uint32_t Behavior(const Binding& b) {
     switch (b.kind) {
         case Kind::Key:
@@ -225,6 +226,8 @@ inline uint32_t Behavior(const Binding& b) {
                    : b.value == 9 ? kStudioUnlock : b.value == 10 ? kSystemReset : kBt;
         case Kind::RuntimeMacro:
             return kRuntimeMacro;
+        case Kind::RuntimeTapDance:
+            return kRuntimeTapDance;
         case Kind::ModTap:
             return kModTap;
         case Kind::LayerTap:
@@ -241,6 +244,7 @@ inline uint32_t Param1(const Binding& b) {
             return 0xc0000 | (b.value == 1 ? 0xe9 : b.value == 2 ? 0xea : 0xe2);
         case Kind::MomentaryLayer:
         case Kind::RuntimeMacro:
+        case Kind::RuntimeTapDance:
             return b.value;
         case Kind::HostAction:
             return b.value >= 7 ? 0 : b.value < 5 ? 3 : b.value == 5 ? 0 : 4;
@@ -282,6 +286,9 @@ inline bool BindingFromWire(uint64_t encoded_id, uint64_t p1, uint64_t p2, Bindi
         return true;
     } else if (id == kRuntimeMacro && p1 < 8 && !p2) {
         out = {Kind::RuntimeMacro, uint16_t(p1), 0};
+        return true;
+    } else if (id == kRuntimeTapDance && p1 <= UINT16_MAX && !p2) {
+        out = {Kind::RuntimeTapDance, uint16_t(p1), 0};
         return true;
     } else if (id == kModTap || id == kLayerTap) {
         Binding tap;
@@ -409,7 +416,7 @@ struct Model {
                 const uint16_t low = data[at++];
                 const uint16_t value = low | (uint16_t(data[at++]) << 8);
                 const uint8_t mods = data[at++];
-                if (kind > unsigned(Kind::LayerTap))
+                if (kind > unsigned(Kind::RuntimeTapDance))
                     return false;
                 b = {Kind(kind), value, mods};
                 Binding check;
@@ -757,7 +764,11 @@ private:
                                "Runtime Macro",
                                "Mod Tap (hold-preferred)",
                                "Layer Tap (hold-preferred)",
-                               "Bootloader", "Studio Unlock", "System Reset", "USB Output"};
+                               "Bootloader",
+                               "Studio Unlock",
+                               "System Reset",
+                               "USB Output",
+                               "Runtime Tap Dance"};
         Text(out, 2, names[id]);
         if (id == kKp) {
             Bytes set;
@@ -794,10 +805,10 @@ private:
             Message(tap, 5, hid);
             Message(set, 2, tap);
             Message(out, 3, set);
-        } else if (id == kRuntimeMacro) {
+        } else if (id == kRuntimeMacro || id == kRuntimeTapDance) {
             Bytes set, slot, range;
             Number(range, 1, 0);
-            Number(range, 2, 7);
+            Number(range, 2, id == kRuntimeTapDance ? UINT16_MAX : 7);
             Message(slot, 4, range);
             Message(set, 1, slot);
             Message(out, 3, set);

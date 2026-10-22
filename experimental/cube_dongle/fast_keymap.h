@@ -21,8 +21,10 @@ inline Bytes FastKeymap(const Bytes& payload, const Rpc& rpc) {
     auto equal = [](const Binding& a, const Binding& b) {
         return a.kind == b.kind && a.value == b.value && a.modifiers == b.modifiers;
     };
-    const char* aliases[] = {"", "kp", "mo", "trans", "none", "bt", "runtime_macro", "mt", "lt",
-                             "bootloader", "studio_unlock", "sys_reset", "out"};
+    const char* aliases[] = {
+        "",   "kp", "mo",         "trans",         "none",      "bt",  "runtime_macro",
+        "mt", "lt", "bootloader", "studio_unlock", "sys_reset", "out", "rtd"};
+    static_assert(sizeof(aliases) / sizeof(aliases[0]) == kLastBehavior + 1);
     auto details = [&](unsigned id, bool alias, bool exclude_name) {
         const auto official = Rpc::BehaviorDetails(id);
         Reader source(official.data(), official.size(), {3});

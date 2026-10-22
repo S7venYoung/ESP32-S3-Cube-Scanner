@@ -23,6 +23,7 @@
 #include "../../experimental/cube_dongle/studio_diagnostics.h"
 #include "../../experimental/cube_dongle/studio_protocol.h"
 #include "../../experimental/cube_dongle/studio_watchdog.h"
+#include "../../experimental/cube_dongle/tapdance_engine.h"
 #include "application.h"
 #include "cube_ble_dongle.h"
 #include "cube_split_bench.h"
@@ -51,6 +52,16 @@ wire::Bytes PeripheralRequest(const std::string& subsystem, const wire::Bytes& p
                               bool unlocked);
 bool RelaySettings(unsigned source, uint32_t idle, uint32_t sleep, bool change);
 void ProcessRelayEvents();
+wire::RuntimeTapDances tapdances;
+wire::DanceModel tapdance_cache;
+wire::TapDanceEngine tapdance_engine;
+std::mutex tapdance_mutex;
+std::mutex tapdance_output_mutex;
+cube_dongle::ReportFrame tapdance_output;
+cube_dongle::ReportFrame TapDanceOutput() {
+    std::lock_guard<std::mutex> lock(tapdance_output_mutex);
+    return tapdance_output;
+}
 wire::RuntimeMacros macros;
 wire::RuntimeCombos combos;
 wire::ComboEngine combo_engine;
@@ -596,6 +607,13 @@ void CubeStudioInitialize() {
                 if (nvs_get_blob(handle, "macros_v1", record.data(), &size) == ESP_OK)
                     macros.Load(record);
             }
+            size = 0;
+            if (nvs_get_blob(handle, "tapdance_v1", nullptr, &size) == ESP_OK && size >= 8 &&
+                size <= 2048) {
+                wire::Bytes record(size);
+                if (nvs_get_blob(handle, "tapdance_v1", record.data(), &size) == ESP_OK)
+                    tapdances.Load(record);
+            }
             uint32_t activity[2]{};
             size = 25;
             wire::Bytes default_record(size);
@@ -654,6 +672,7 @@ void CubeStudioInitialize() {
         }
         UpdateCache();
         macro_cache = macros.model;
+        tapdance_cache = tapdances.model;
         combo_cache = combos.model;
         rpc.custom.push_back(
             {"cormoran__runtime_combo", "https://cormoran.github.io/zmk-feature-runtime-combo/",
@@ -695,6 +714,17 @@ void CubeStudioInitialize() {
                                   auto response = macros.Handle(payload, unlocked, SaveMacros);
                                   std::lock_guard<std::mutex> lock(macro_mutex);
                                   macro_cache = macros.model;
+                                  return response;
+                              }});
+        rpc.custom.push_back({"cormoran__runtime_tapdance",
+                              "https://cormoran.github.io/zmk-feature-runtime-tapdance/",
+                              [](const wire::Bytes& payload, bool unlocked) {
+                                  auto response = tapdances.Handle(
+                                      payload, unlocked, [](const wire::Bytes& bytes) {
+                                          return SaveRecord("tapdance_v1", bytes);
+                                      });
+                                  std::lock_guard<std::mutex> lock(tapdance_mutex);
+                                  tapdance_cache = tapdances.model;
                                   return response;
                               }});
         rpc.custom.push_back({"zmk__device_info",
@@ -854,11 +884,17 @@ cube_dongle::ReportFrame CubeStudioMacroOutput(cube_dongle::ReportFrame physical
     macro_player.Tick(uint32_t(esp_timer_get_time() / 1000));
     if (macro_player.Active())
         activity_last = esp_timer_get_time();
-    return wire::MergeReports(macro_player.Merge(physical), sensor_output.report);
+    return wire::MergeReports(
+        wire::MergeReports(macro_player.Merge(physical), sensor_output.report), TapDanceOutput());
 }
 void CubeStudioCancelMacros() {
     CubeSplitCancelHoldTaps();
     macro_player.Cancel();
+    tapdance_engine.Cancel();
+    {
+        std::lock_guard<std::mutex> lock(tapdance_output_mutex);
+        tapdance_output = {};
+    }
     pointer_engine.CancelMotion();
     sensor_engine.Cancel();
     sensor_output = {};
@@ -868,16 +904,55 @@ void CubeStudioCancelMacros() {
 uint8_t CubeStudioCurrentModifiers(uint8_t physical_modifiers) {
     cube_dongle::ReportFrame physical;
     physical.keyboard[0] = physical_modifiers;
-    return wire::MergeReports(macro_player.Merge(physical), sensor_output.report).keyboard[0];
+    return wire::MergeReports(
+               wire::MergeReports(macro_player.Merge(physical), sensor_output.report),
+               TapDanceOutput())
+        .keyboard[0];
 }
 wire::ComboResult CubeStudioFilterPositions(const cube_dongle::SplitState::Snapshot& raw,
-                                            size_t layer) {
+                                            cube_dongle::KeyboardState<61, 4>& keyboard) {
+    const auto layer = keyboard.ActiveLayer();
     if (combo_engine.Neutral()) {
         std::lock_guard<std::mutex> lock(combo_mutex);
         if (combo_revision != combo_seen && combo_engine.Configure(combo_cache))
             combo_seen = combo_revision;
     }
     auto result = combo_engine.Apply(raw, uint32_t(esp_timer_get_time() / 1000), layer);
+    const auto now = uint32_t(esp_timer_get_time() / 1000);
+    tapdance_engine.TappingTerm(tapping_term.load());
+    tapdance_engine.Prepare(result.filtered, now);
+    // Single NimBLE caller; keep the keymap/state copy off the host task stack.
+    static auto preview = keyboard;
+    preview = keyboard;
+    cube_dongle::SplitState::Snapshot released;
+    released.fill(0);
+    for (size_t p = 0; p < 61; ++p)
+        if (keyboard.IsPressed(p) && (result.filtered[p / 8] & (1u << (p % 8))))
+            released[p / 8] |= 1u << (p % 8);
+    preview.Apply(released, now);
+    auto pulse_base = macro_player.Merge({preview.Report(), preview.MediaReport()});
+    preview = keyboard;
+    preview.SetExternalLayers(result.layers | tapdance_engine.Layers() |
+                              pointer_engine.Layers(now) | sensor_output.layers);
+    preview.Apply(result.filtered, now);
+    {
+        std::lock_guard<std::mutex> lock(tapdance_mutex);
+        tapdance_engine.Finish(preview, tapdance_cache, result.filtered, result.taps);
+    }
+    {
+        std::lock_guard<std::mutex> lock(tapdance_output_mutex);
+        tapdance_output = tapdance_engine.Report();
+    }
+    pulse_base = wire::MergeReports(pulse_base, TapDanceOutput());
+    for (const auto& pulse : tapdance_engine.TakePulses()) {
+        result.prefix.push_back(
+            wire::MergeReports(pulse_base, wire::TapDanceEngine::BindingReport(pulse)));
+        result.prefix.push_back(pulse_base);
+    }
+    result.report = wire::MergeReports(result.report, TapDanceOutput());
+    result.layers |= tapdance_engine.Layers();
+    result.actions |= tapdance_engine.TakeActions();
+    result.macro_mask |= tapdance_engine.TakeMacros();
     if (result.macro_mask) {
         std::lock_guard<std::mutex> lock(macro_mutex);
         for (size_t slot = 0; slot < 8; ++slot)
@@ -890,7 +965,8 @@ wire::ComboResult CubeStudioFilterPositions(const cube_dongle::SplitState::Snaps
     return result;
 }
 bool CubeStudioCombosNeedTick() {
-    return combo_engine.NeedsTick() || pointer_engine.NeedsTick() || sensor_engine.NeedsTick();
+    return combo_engine.NeedsTick() || pointer_engine.NeedsTick() || sensor_engine.NeedsTick() ||
+           tapdance_engine.NeedsTick();
 }
 void CubeStudioSetActivityHandler(std::function<void(unsigned)> handler) {
     std::lock_guard<std::mutex> lock(activity_mutex);

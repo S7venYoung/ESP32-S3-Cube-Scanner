@@ -20,7 +20,7 @@ struct SensorSettings {
                                Param2(value.binding), checked) &&
                checked.kind == value.binding.kind && checked.value == value.binding.value &&
                checked.modifiers == value.binding.modifiers && checked.kind != Kind::ModTap &&
-               checked.kind != Kind::LayerTap;
+               checked.kind != Kind::LayerTap && checked.kind != Kind::RuntimeTapDance;
     }
     Bytes Export() const {
         Bytes out{'C', 'S', 'N', 1};

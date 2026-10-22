@@ -57,7 +57,8 @@ enum class Kind {
     HostAction,
     RuntimeMacro,
     ModTap,
-    LayerTap
+    LayerTap,
+    RuntimeTapDance
 };
 struct Binding {
     Kind kind = Kind::None;
@@ -215,6 +216,7 @@ public:
         return bits;
     }
     uint16_t Actions() const { return actions_; }
+    bool IsPressed(size_t position) const { return position < Positions && pressed_[position]; }
     Binding PressedBinding(size_t position) const {
         return position < Positions && pressed_[position] ? latched_[position] : Binding{};
     }

@@ -24,3 +24,7 @@ ESP-IDF v6.1，`bash scripts/build-cube-dual-candidate.sh`。Actions 使用双�
 ## Cube 键盘主题数据转发
 
 支持左手猫咪层号与右手 CPU/RAM/温度主题，复用既有电脑采集结果和 split relay。USB 与已配对 Wi-Fi 都可更新系统信息；详见 [数据协议与升级说明](docs/cube-keyboard-forwarding.md)。
+
+### DYA 键盘功能
+
+支持范围、新增 Runtime Tap Dance API v2 及使用方法见 [DYA 功能说明](experimental/cube_dongle/DYA-FEATURES.md)。

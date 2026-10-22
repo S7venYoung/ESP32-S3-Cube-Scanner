@@ -17,7 +17,8 @@ struct ComboModel {
     uint32_t timeout = 40, prior_idle = 0;
     bool slow_release = false;
     static bool Valid(const Combo& combo) {
-        if (combo.binding.kind == Kind::ModTap || combo.binding.kind == Kind::LayerTap)
+        if (combo.binding.kind == Kind::ModTap || combo.binding.kind == Kind::LayerTap ||
+            combo.binding.kind == Kind::RuntimeTapDance)
             return false;  // Hold-tap belongs to physical key positions, not a synthetic chord.
         if (combo.name.size() > 31 || (combo.keys.size() && combo.keys.size() < 2) ||
             combo.keys.size() > 4 || combo.layers > 15 || combo.timeout > 1000 ||

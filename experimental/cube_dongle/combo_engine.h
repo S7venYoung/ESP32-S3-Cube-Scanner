@@ -28,6 +28,7 @@ struct ComboResult {
     ReportFrame report;
     uint16_t actions = 0;
     uint8_t macro_mask = 0, layers = 0;
+    std::vector<ReportFrame> prefix;  // Ordered synthetic down/up pairs before the physical report.
 };
 class ComboEngine {
 public:

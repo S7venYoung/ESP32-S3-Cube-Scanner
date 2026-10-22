@@ -127,7 +127,18 @@ void PublishKeyboard() {
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioRefreshKeymap(keyboard);
     CubeStudioRecordPositions(physical);
-    const auto combo = CubeStudioFilterPositions(physical, keyboard.ActiveLayer());
+    const auto combo = CubeStudioFilterPositions(physical, keyboard);
+    for (const auto& prefix : combo.prefix) {
+#if CONFIG_CUBE_USB_DONGLE_OUTPUT
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+        CubeDualSubmit(prefix, 0);
+#else
+        CubeUsbSubmit(prefix);
+#endif
+#else
+        (void)prefix;
+#endif
+    }
     filtered = combo.filtered;
     taps = combo.taps;
     extra = combo.report;
@@ -189,6 +200,13 @@ void PublishKeyboard() {
 }
 ble_npl_callout retry;
 ble_npl_callout telemetry_timer;
+#if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
+ble_npl_callout input_timer;
+void InputTimer(ble_npl_event*) {
+    CubeSplitInputTick();
+    ble_npl_callout_reset(&input_timer, std::max<uint32_t>(1, ble_npl_time_ms_to_ticks32(5)));
+}
+#endif
 std::mutex telemetry_mutex;
 FightTelemetry fight_cache;
 KeyboardStatus keyboard_cache;
@@ -1027,12 +1045,21 @@ void OnSync() {
                              nullptr);
         for (auto& peer : peers)
             ble_npl_callout_init(&peer.timeout, nimble_port_get_dflt_eventq(), Timeout, &peer);
+#if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
+        ble_npl_callout_init(&input_timer, nimble_port_get_dflt_eventq(), InputTimer, nullptr);
+#endif
         callouts_initialized = true;
     }
+#if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    InputTimer(nullptr);
+#endif
     TelemetryTick(nullptr);
     Scan(nullptr);
 }
 void OnReset(int reason) {
+#if CONFIG_CUBE_STUDIO_RPC
+    CubeStudioCancelMacros();
+#endif
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
     CubeBleHostReset();
 #endif
@@ -1041,6 +1068,9 @@ void OnReset(int reason) {
     if (callouts_initialized) {
         ble_npl_callout_stop(&retry);
         ble_npl_callout_stop(&telemetry_timer);
+#if !CONFIG_CUBE_BLE_DONGLE_OUTPUT
+        ble_npl_callout_stop(&input_timer);
+#endif
     }
     for (size_t side = 0; side < 2; ++side) {
         input.Disconnect(side);

@@ -85,7 +85,7 @@ class StudioWireTest(unittest.TestCase):
         self.assertEqual(self.call('core', 'get_device_info').core.get_device_info.name, 'Cube Velvet Pro')
         self.assertEqual(self.call('core', 'get_lock_state').core.get_lock_state, 0)
         self.assertEqual(len(self.call('custom', 'list_custom_subsystems', {}).custom.list_custom_subsystems.subsystems), 0)
-        self.assertEqual(list(self.call('behaviors', 'list_all_behaviors').behaviors.list_all_behaviors.behaviors), list(range(1, 13)))
+        self.assertEqual(list(self.call('behaviors', 'list_all_behaviors').behaviors.list_all_behaviors.behaviors), list(range(1, 14)))
         details = self.call('behaviors', 'get_behavior_details', {'behavior_id': 1}).behaviors.get_behavior_details
         self.assertEqual(details.id, 1); self.assertTrue(details.metadata)
         layouts = self.call('keymap', 'get_physical_layouts').keymap.get_physical_layouts

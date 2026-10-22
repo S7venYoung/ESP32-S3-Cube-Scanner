@@ -20,7 +20,7 @@ cube_dongle::ReportFrame CubeStudioMacroOutput(cube_dongle::ReportFrame physical
 uint8_t CubeStudioCurrentModifiers(uint8_t physical_modifiers);
 void CubeStudioCancelMacros();
 cube_dongle::studio::ComboResult CubeStudioFilterPositions(
-    const cube_dongle::SplitState::Snapshot& raw, size_t layer);
+    const cube_dongle::SplitState::Snapshot& raw, cube_dongle::KeyboardState<61, 4>& keyboard);
 bool CubeStudioCombosNeedTick();
 void CubeStudioSetActivityHandler(std::function<void(unsigned)> handler);
 void CubeStudioActivityWake();
