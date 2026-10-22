@@ -1,4 +1,4 @@
-2026-10-22 User requested one dongle firmware build.
-Build 74da305a: scanner typography/motion ports, central reset clock, mirrored quota and energy gauges, startup RTC hold release.
-Cube USB+BLE only; no scanner, USB-only, companion or keyboard-half builds.
-No automatic flash or release replacement. Cold-start hardware validation pending.
+2026-10-22 User requested one additional dongle build.
+Build 59cca9d: align left quota to health bar edge and thicken M/K token units, including prior fight layout and power-hold changes.
+Cube USB+BLE only. No scanner, USB-only, companion or keyboard-half builds.
+No automatic flashing or release replacement.
