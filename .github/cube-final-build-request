@@ -1,4 +1,4 @@
-2026-10-22 Retry latest dongle build after fixing missing test dependency.
-Install grpcio-tools==1.84.0 inside ESP-IDF container before running Tap Dance protobuf tests.
-Cube USB+BLE dongle only. No scanner, USB-only, companion or keyboard-half builds.
-No automatic flashing or release replacement.
+2026-10-22 User requested one new dongle firmware build.
+Build latest 2c31478088f8c5b78b7a951103db2c68f1c1ee61: align behavior display names and parameter labels with DYA, preserving stored bindings and IDs.
+Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
+No automatic flashing, pairing reset or release replacement.
