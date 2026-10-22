@@ -93,10 +93,10 @@ inline void Paint(uint8_t* pixels, int width, int height, int stride, const char
                                 const float ex = gx - s.ax - t * dx, ey = gy - s.ay - t * dy;
                                 edge = std::min(edge, std::sqrt(ex * ex + ey * ey));
                             }
-                            if (edge > 1.2f)
+                            if (edge > 1.55f)
                                 continue;
                             const uint32_t color =
-                                edge <= 0.75f ? (gy < 4 ? 0xFF7448 : 0xFF442C) : 0xFFF3CD;
+                                edge <= 1.05f ? (gy < 4 ? 0xFF7448 : 0xFF442C) : 0xFFF3CD;
                             channels[0] += color & 255;
                             channels[1] += (color >> 8) & 255;
                             channels[2] += (color >> 16) & 255;

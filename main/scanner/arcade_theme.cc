@@ -126,6 +126,9 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
         // Mirror text around the center: label/value | value/label.
         Text(s->root,i==0?"5H LEFT":"7D LEFT",i==0?8:177,39,57,white,14);
         s->quota[i]=Text(s->root,"--%",i==0?65:142,39,34,gold,14);
+        // Anchor the left percentage to the bar's inner edge, mirroring the right side.
+        if(i==0)for(int child=0;child<2;++child)
+            lv_obj_set_style_text_align(lv_obj_get_child(s->quota[i],child),LV_TEXT_ALIGN_RIGHT,0);
     }
     s->reset_clock=CodexDrawText(s->root,"--:--",99,26,42,gold,14,true);
     ArcadeDojoCreate(s->root);
