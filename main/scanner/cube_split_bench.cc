@@ -1,4 +1,5 @@
 #include "cube_split_bench.h"
+#include "../../experimental/cube_dongle/keyboard_dashboard.h"
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
 #include "cube_ble_dongle.h"
 #endif
@@ -96,6 +97,9 @@ struct RelayJob {
 };
 std::mutex relay_jobs_mutex;
 std::deque<RelayJob> relay_jobs;
+std::mutex dashboard_mutex;
+cube_dongle::KeyboardDashboard dashboard;
+
 std::atomic<uint32_t> forget_requested{0}, forget_done{0};
 std::atomic<bool> forget_success{false};
 std::atomic<int64_t> forget_deadline{0};
@@ -503,6 +507,48 @@ int OnBattery(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, v
         peer->battery_pending = false;
     return 0;
 }
+// Runs only on the existing NimBLE host thread; never creates another BLE host.
+void PublishKeyboardDashboard() {
+    const uint64_t now = esp_timer_get_time() / 1000;
+    static uint64_t next = 0;
+    if (now < next || !relay_ready.load())
+        return;
+    {
+        std::lock_guard<std::mutex> lock(relay_jobs_mutex);
+        if (!relay_jobs.empty())
+            return;  // Give pending Studio/RPC work priority.
+    }
+    next = now + 1000;
+    unsigned output = DASH_OUTPUT_NONE, profile = 0;
+#if CONFIG_CUBE_BLE_DONGLE_OUTPUT
+    if (CubeDualEnabled()) {
+        if (CubeDualUsesBle() && CubeDualBleReady()) {
+            output = DASH_OUTPUT_BLE;
+            profile = CubeDualProfile() + 1;
+        } else if (!CubeDualUsesBle() && CubeUsbConnected())
+            output = DASH_OUTPUT_USB;
+    }
+#elif CONFIG_CUBE_USB_DONGLE_OUTPUT
+    if (CubeUsbEnabled() && CubeUsbConnected())
+        output = DASH_OUTPUT_USB;
+#endif
+    std::array<uint8_t, DASH_PACKET_SIZE> packet;
+    {
+        std::lock_guard<std::mutex> lock(dashboard_mutex);
+        packet = dashboard.Packet(output, profile, now);
+    }
+    const auto layer = keyboard.ActiveLayer();
+    for (unsigned source = 1; source <= 2; ++source) {
+        if (!(relay_ready.load() & (1u << (source - 1))))
+            continue;
+        if (layer < 255)
+            CubeSplitQueueRelay(source, "vlcat", {1, uint8_t(layer)});
+        // Left is the fixed cat page; only the right consumes system metrics.
+        if (source == 2)
+            CubeSplitQueueRelay(source, DASH_EVENT, {packet.begin(), packet.end()});
+    }
+}
+
 void TelemetryTick(ble_npl_event*) {
     const auto now = esp_timer_get_time();
     static const ble_uuid16_t battery_uuid = BLE_UUID16_INIT(0x2a19);
@@ -519,6 +565,8 @@ void TelemetryTick(ble_npl_event*) {
         }
     }
     PublishStatus();
+    PublishKeyboardDashboard();
+    PumpRelayJobs();
     ble_npl_callout_reset(&telemetry_timer, ble_npl_time_ms_to_ticks32(100));
 }
 bool SaveAutoBinding(Peer& peer) {
@@ -1231,4 +1279,9 @@ std::string CubeSplitBenchBind(const std::string& command) {
 #else
     return commit == ESP_OK ? "CUBE-SPLIT-BIND SAVED REBOOT-REQUIRED HID-OFF" : "ERR NVS-WRITE";
 #endif
+}
+
+bool CubeSplitUpdateHostMetrics(const uint8_t* data, size_t size) {
+    std::lock_guard<std::mutex> lock(dashboard_mutex);
+    return dashboard.Update(data, size, esp_timer_get_time() / 1000);
 }

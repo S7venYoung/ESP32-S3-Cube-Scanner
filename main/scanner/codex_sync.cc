@@ -9,6 +9,7 @@
 #endif
 #endif
 #if CONFIG_CUBE_SPLIT_BENCH
+#include "../../experimental/cube_dongle/keyboard_dashboard.h"
 #include "cube_split_bench.h"
 #endif
 #include <driver/uart.h>
@@ -42,6 +43,13 @@ bool Fresh(const Sample& s, int64_t now) {
 }
 
 bool Apply(const char* line, bool is_usb) {
+#if CONFIG_CUBE_SPLIT_BENCH
+    if (line && !std::strncmp(line, "HOST1 ", 6)) {
+        std::array<uint8_t, DASH_DATA_SIZE> data;
+        return cube_dongle::ParseHostMetricsFrame(line, data) &&
+               CubeSplitUpdateHostMetrics(data.data(), data.size());
+    }
+#endif
     CodexMetrics metrics;
     if (!ParseCodexFrame(line, metrics))
         return false;
@@ -89,7 +97,7 @@ esp_err_t Update(httpd_req_t* req) {
     while (received > 0 && (body[received - 1] == '\n' || body[received - 1] == '\r'))
         body[--received] = 0;
     if (!Apply(body, false))
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid CODEX frame");
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid metrics frame");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "OK\n");
 }
@@ -170,6 +178,12 @@ void SyncTask(void*) {
                         Reply("CUBE-CODEX/2");
                     else if (line == "CAPS3")
                         Reply("CUBE-CODEX/3");
+                    else if (line == "CAPSHOST")
+#if CONFIG_CUBE_SPLIT_BENCH
+                        Reply("CUBE-HOST-METRICS/1");
+#else
+                        Reply("CUBE-HOST-METRICS/0");
+#endif
                     else if (line == "PAIR")
                         Reply("CUBE-PAIR " + IpAddress() + " " + token);
 #if CONFIG_CUBE_STUDIO_RPC
@@ -212,7 +226,7 @@ void SyncTask(void*) {
                     }
 #endif
 #endif
-                    else if (line.rfind("CODEX", 0) == 0)
+                    else if (line.rfind("CODEX", 0) == 0 || line.rfind("HOST1 ", 0) == 0)
                         Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
                 }
                 line.clear();

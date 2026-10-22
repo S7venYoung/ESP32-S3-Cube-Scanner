@@ -19,3 +19,6 @@ bool CubeSplitForgetBonds();  // Secured DYA action; removes only two split peer
                               // profiles.
 bool CubeSplitQueueRelay(unsigned source, const std::string& name,
                          const std::vector<uint8_t>& data);
+
+// Validated, volatile computer metrics from USB or authenticated Wi-Fi.
+bool CubeSplitUpdateHostMetrics(const uint8_t* data, size_t size);

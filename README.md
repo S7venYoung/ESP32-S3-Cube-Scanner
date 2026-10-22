@@ -20,3 +20,7 @@ ESP-IDF v6.1，`bash scripts/build-cube-dual-candidate.sh`。Actions 使用双�
 - 不要刷正辰版本，不要把应用镜像当完整镜像写到 0x0；已有运行态 HID/CDC 端口不等于 ROM 下载端口。BOOT 恢复及刷机工具说明见 [双模说明](docs/cube-dual-candidate.md)。
 
 配置保存不整体擦除小智激活、Wi-Fi 与蓝牙绑定。首次换中央端可能需要清除旧左右手配对，普通更新不应每次都刷 settings_reset。编译成功不等于新功能全部实机验证。
+
+## Cube 键盘主题数据转发
+
+支持左手猫咪层号与右手 CPU/RAM/温度主题，复用既有电脑采集结果和 split relay。USB 与已配对 Wi-Fi 都可更新系统信息；详见 [数据协议与升级说明](docs/cube-keyboard-forwarding.md)。
