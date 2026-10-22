@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 python -m unittest discover -s scripts/tests -q
+for theme_test in arcade_token_text arcade_motion fight_telemetry arcade_energy_mirror; do
+    g++ -std=c++17 -Wall -Wextra -Werror "tests/${theme_test}_test.cc" -o "/tmp/cube-${theme_test}-test"
+    "/tmp/cube-${theme_test}-test"
+done
 g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/state_test.cc -o /tmp/cube-dongle-state-test
 /tmp/cube-dongle-state-test
 g++ -std=c++17 -Wall -Wextra -Werror experimental/cube_dongle/studio_test.cc -o /tmp/cube-studio-test

@@ -63,7 +63,10 @@ inline void Energy(uint8_t* p,int w,int h,int stride,int percent,bool right_alig
     for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
         unsigned count=0,rr=0,gg=0,bb=0;
         for(float sy:{.25f,.75f})for(float sx:{.25f,.75f}) {
-            const float px=(x+sx)*108/w,py=(y+sy)*25/h;
+            // Reflect the entire right gauge, not only the cell counter.
+            // Remaining charge stays at each outer edge as the center empties.
+            const int sample_x=right_aligned?w-1-x:x;
+            const float px=(sample_x+sx)*108/w,py=(y+sy)*25/h;
             if(!Inside(px,py,outer) && Outline(px,py,outer)>.35f)continue;
             uint32_t color=0x080D12;
             if(Outline(px,py,outer)<.45f)color=py<12?0xE4C591:0xBF8F49;
@@ -72,7 +75,7 @@ inline void Energy(uint8_t* p,int w,int h,int stride,int percent,bool right_alig
                 const float u=px-7+(py-5)*.38f;
                 const int cell=int(u/9.25f);
                 if(percent>=0 && py>5 && py<20 && cell>=0 && cell<10 && std::fmod(u,9.25f)>1.1f) {
-                    const int fill_cell=right_aligned?9-cell:cell;
+                    const int fill_cell=cell;
                     const uint32_t full=percent<=20?(py<12?0xFFC568:0xE77820):(py<12?0x31DDF8:0x009FE0);
                     color=fill_cell*10<percent ? full:0x29343E;
                 }

@@ -61,6 +61,11 @@ private:
         rtc_gpio_init(GPIO_NUM_21);
         rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
         rtc_gpio_set_level(GPIO_NUM_21, 1);
+        // Shutdown can retain a LOW level on the existing power-hold pin.
+        // Preload the normal HIGH output before releasing that retention.
+        // This restores the latch once the CPU boots; it cannot power a CPU
+        // held off by the board's external power/EN circuit.
+        rtc_gpio_hold_dis(GPIO_NUM_21);
 
 #if CONFIG_ZMK_SCANNER_MODE
         power_save_timer_ = new PowerSaveTimer(-1, -1, -1);

@@ -14,6 +14,6 @@ int main() {
     packet[4]=2; assert(!ParseFightTelemetry(packet,17,value));
     packet[4]=1; packet[5]=7; packet[12]=101;
     assert(!ParseFightTelemetry(packet,17,value));
-    assert(FightActionForWpm(-1)==0 && FightActionForWpm(4)==0 && FightActionForWpm(5)==1);
-    assert(FightActionForWpm(29)==1 && FightActionForWpm(30)==2 && FightActionForWpm(70)==3);
+    assert(FightActionForWpm(-1)==0 && FightActionForWpm(2)==0 && FightActionForWpm(3)==1);
+    assert(FightActionForWpm(9)==1 && FightActionForWpm(10)==2 && FightActionForWpm(39)==2 && FightActionForWpm(40)==3);
 }

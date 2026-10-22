@@ -4,6 +4,7 @@
 #include "arcade_sprites.h"
 #include "arcade_text.h"
 #include "codex_metrics.h"
+#include "codex_draw.h"
 #include "fight_telemetry.h"
 #include <algorithm>
 #include <cstdio>
@@ -16,6 +17,7 @@ struct Scene {
     lv_obj_t *root, *quota[2], *health[2], *rage[2], *fighter[2], *effect[2];
     lv_obj_t *total, *transport, *cube, *cube_fill, *keys[4], *symbols[4];
     lv_obj_t *versus, *today;
+    lv_obj_t* reset_clock = nullptr;
     ArcadeActivity activity;
     lv_timer_t* timer = nullptr;
     ArcadeMotion motion[2];
@@ -91,11 +93,11 @@ void Tick(Scene& s) {
         const bool energy=m.pose==3 || m.pose==5;
         if(energy) {
             lv_obj_remove_flag(s.effect[i],LV_OBJ_FLAG_HIDDEN);
-            const int travel=std::min<int>(70,m.elapsed/5);
+            const int travel=std::min<int>(70,m.strike_age/3);
             lv_obj_set_pos(s.effect[i],i==0?74+travel:150-travel, m.pose==5?102:120);
             lv_obj_set_size(s.effect[i],m.pose==5?36:16,m.pose==5?25:12);
         } else lv_obj_add_flag(s.effect[i],LV_OBJ_FLAG_HIDDEN);
-        if(s.fighter[i])lv_obj_set_y(s.fighter[i],m.pose==4?-9:0);
+        if(s.fighter[i])lv_obj_set_pos(s.fighter[i],(i==0?-12:109)+(i==0?m.x:-m.x),m.y);
     }
 }
 } // namespace
@@ -114,16 +116,18 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
     s->cube_fill=Box(cube_icon,2,2,12,6,0x25CF60,1);
     s->cube=StatusLabel(s->root,"--%",205,34,white);
     for(int i=0;i<2;++i) {
-        const int x=i==0?6:126;
-        auto* frame=Box(s->root,x,27,108,11,0x191918,3);
+        const int x=i==0?6:142;
+        auto* frame=Box(s->root,x,27,92,11,0x191918,3);
         lv_obj_set_style_border_color(frame,lv_color_hex(white),0);
         lv_obj_set_style_border_width(frame,1,0);
-        s->health[i]=Box(frame,2,2,104,7,i==0?red:gold,2);
+        s->health[i]=Box(frame,2,2,88,7,i==0?red:gold,2);
         lv_obj_set_style_bg_grad_color(s->health[i],lv_color_hex(i==0?gold:red),0);
         lv_obj_set_style_bg_grad_dir(s->health[i],LV_GRAD_DIR_HOR,0);
-        Text(s->root,i==0?"5H LEFT":"7D LEFT",x+2,39,66,white,14);
-        s->quota[i]=Text(s->root,"--%",x+68,39,40,gold,14);
+        // Mirror text around the center: label/value | value/label.
+        Text(s->root,i==0?"5H LEFT":"7D LEFT",i==0?8:177,39,57,white,14);
+        s->quota[i]=Text(s->root,"--%",i==0?65:142,39,34,gold,14);
     }
+    s->reset_clock=CodexDrawText(s->root,"--:--",99,26,42,gold,14,true);
     ArcadeDojoCreate(s->root);
     // Stage is a fixed opaque image, only fighters/effects animate above it.
     auto* stage=lv_obj_create(s->root);lv_obj_remove_style_all(stage);
@@ -153,7 +157,7 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
         const char* symbols[]={"^","~","@","#"};
         s->symbols[i]=ArcadeText(s->keys[i],symbols[i],8,1,24,white,23);
     }
-    s->timer=lv_timer_create([](lv_timer_t* timer){Tick(*static_cast<Scene*>(lv_timer_get_user_data(timer)));},80,s);
+    s->timer=lv_timer_create([](lv_timer_t* timer){Tick(*static_cast<Scene*>(lv_timer_get_user_data(timer)));},40,s);
     lv_obj_add_event_cb(s->root,[](lv_event_t* e){auto* s=static_cast<Scene*>(lv_event_get_user_data(e));lv_timer_delete(s->timer);delete s;},LV_EVENT_DELETE,s);
     ArcadeRefresh(s->root);return s->root;
 }
@@ -177,9 +181,11 @@ void ArcadeRefresh(lv_obj_t* root) {
     const int quota[]={c.online?c.metrics.left:-1,c.online?c.metrics.week_left:-1};
     const int battery[]={f.online?f.left_battery:-1,f.online?f.right_battery:-1};
     for(int i=0;i<2;++i){
-        if(quota[i]>=0)std::snprintf(text,sizeof(text),"%d%%",quota[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.quota[i],text);Bar(s.health[i],quota[i],104,i==1);
+        if(quota[i]>=0)std::snprintf(text,sizeof(text),"%d%%",quota[i]);else std::snprintf(text,sizeof(text),"--%%");SetText(s.quota[i],text);Bar(s.health[i],quota[i],88,i==1);
         ArcadeEnergySet(s.rage[i],battery[i],i==1);
     }
+    FormatCodexReset(c.metrics,c.online,text,sizeof(text));
+    CodexDrawSetText(s.reset_clock,text);
     if(!c.online || c.metrics.tokens<0)std::snprintf(text,sizeof(text),"--");
     else if(c.metrics.tokens>=1000000)std::snprintf(text,sizeof(text),"%.1fM",c.metrics.tokens/1000000.0);
     else if(c.metrics.tokens>=1000)std::snprintf(text,sizeof(text),"%.1fK",c.metrics.tokens/1000.0);
