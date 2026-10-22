@@ -1,4 +1,4 @@
-2026-10-22 User requested one dongle firmware build.
-Build latest source 66601b4db3c9a6a1b01657095ec27255f148a84b, including DYA Runtime Tap Dance API v2 and release-safe execution.
-Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
-No automatic flash, pairing reset or release replacement.
+2026-10-22 Retry latest dongle build after fixing missing test dependency.
+Install grpcio-tools==1.84.0 inside ESP-IDF container before running Tap Dance protobuf tests.
+Cube USB+BLE dongle only. No scanner, USB-only, companion or keyboard-half builds.
+No automatic flashing or release replacement.
