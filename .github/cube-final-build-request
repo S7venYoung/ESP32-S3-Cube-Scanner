@@ -1,4 +1,4 @@
-2026-10-22 User requested one latest dongle firmware build.
-Build 5e6079a14147f1ee30d0bb94b99626e191ff93fa: forward computer metrics and active layers to keyboard displays, including fight quota alignment and bold units.
+2026-10-22 User requested one dongle firmware build.
+Build latest source 66601b4db3c9a6a1b01657095ec27255f148a84b, including DYA Runtime Tap Dance API v2 and release-safe execution.
 Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
 No automatic flash, pairing reset or release replacement.
