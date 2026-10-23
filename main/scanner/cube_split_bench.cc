@@ -923,8 +923,16 @@ int OnGap(ble_gap_event* event, void* arg) {
             ble_npl_callout_reset(&peer.timeout, ble_npl_time_ms_to_ticks32(15000));
             if (Encrypted(peer))
                 Discover(peer);
-            else if (ble_gap_security_initiate(peer.connection))
-                Fail(peer, "cannot initiate security");
+            else {
+                const int security_rc = ble_gap_security_initiate(peer.connection);
+                split_diagnostics[cookie & 1].security_start = security_rc;
+                // The peripheral can start SMP before our CONNECT callback.
+                // EALREADY is an active handshake, not a failed authentication.
+                if (security_rc && security_rc != BLE_HS_EALREADY) {
+                    split_diagnostics[cookie & 1].last_error = security_rc;
+                    Fail(peer, "cannot initiate security");
+                }
+            }
         }
         Retry();
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
@@ -958,6 +966,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         Retry();
     } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
                peer.connection == event->enc_change.conn_handle) {
+        split_diagnostics[cookie & 1].encryption_status = event->enc_change.status;
         split_diagnostics[cookie & 1].last_error = event->enc_change.status;
         ESP_LOGI(kTag, "%s encryption status=%d identity_ok=%d",
                  (cookie & 1) ? "right" : "left", event->enc_change.status, Encrypted(peer));
