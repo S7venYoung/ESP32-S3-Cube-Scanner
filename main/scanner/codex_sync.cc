@@ -196,6 +196,8 @@ void SyncTask(void*) {
                               std::to_string(uxTaskGetStackHighWaterMark(nullptr)));
 #endif
 #if CONFIG_CUBE_SPLIT_BENCH
+                    else if (line == "DONGLE SPLIT DIAG")
+                        Reply(CubeSplitDiagnostics());
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
                     else if (line == "DONGLE")
                         Reply("CUBE-DUAL-CANDIDATE/1 " + std::to_string(CubeSplitBenchStatus()) +

@@ -1,4 +1,5 @@
 #include "cube_split_bench.h"
+#include "../../experimental/cube_dongle/split_diagnostics.h"
 #include "../../experimental/cube_dongle/keyboard_dashboard.h"
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
 #include "cube_ble_dongle.h"
@@ -87,6 +88,7 @@ struct Peer {
     bool battery_pending = false;
 };
 Peer peers[2];
+cube_dongle::SplitDiagnostics split_diagnostics[2];
 std::atomic<uint8_t> relay_ready{0};
 std::array<std::atomic<uintptr_t>, 2> relay_generations{};
 struct RelayJob {
@@ -222,6 +224,7 @@ void PublishStatus() {
             ++pressed;
     uint32_t word = pressed << 8;
     for (size_t side = 0; side < 2; ++side) {
+        split_diagnostics[side].phase = static_cast<unsigned>(peers[side].phase);
         if (peers[side].configured)
             word |= 1u << side;
         if (peers[side].phase == Phase::Ready)
@@ -448,6 +451,7 @@ void PumpRelayJobs() {
     }
 }
 void Fail(Peer& peer, const char* reason) {
+    split_diagnostics[Side(peer)].failed_phase = static_cast<int>(peer.phase);
     relay_ready.fetch_and(~(1u << Side(peer)));
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
     input.Disconnect(Side(peer));
@@ -803,6 +807,7 @@ void Discover(Peer& peer) {
         Fail(peer, "cannot discover split service");
 }
 void Connect(Peer& peer) {
+    ++split_diagnostics[Side(peer)].attempts;
     ESP_LOGI(kTag, "%s connecting (bound=%d)", Side(peer) ? "right" : "left", peer.configured);
     connecting = true;
     peer.phase = Phase::Connecting;
@@ -815,6 +820,7 @@ void Connect(Peer& peer) {
         ble_gap_connect(own_address_type, &peer.address, 10000, nullptr, OnGap, Cookie(Side(peer)));
     if (rc) {
         ESP_LOGW(kTag, "%s connect start failed rc=%d", Side(peer) ? "right" : "left", rc);
+        split_diagnostics[Side(peer)].last_error = rc;
         peer.phase = Phase::Idle;
         peer.learning = false;
         peer.retry_after = esp_timer_get_time() + 1000000;
@@ -845,6 +851,11 @@ bool ConnectCandidate() {
 }
 int OnGap(ble_gap_event* event, void* arg) {
     if (event->type == BLE_GAP_EVENT_DISC) {
+        for (size_t side = 0; side < 2; ++side)
+            if (peers[side].configured &&
+                (peers[side].address.type & 1) == (event->disc.addr.type & 1) &&
+                !std::memcmp(peers[side].address.val, event->disc.addr.val, 6))
+                split_diagnostics[side].Advertisement(esp_timer_get_time() / 1000);
         // Known bonded halves use directed advertisements without service data.
         if (connecting || event->disc.event_type > 1)
             return 0;
@@ -891,6 +902,7 @@ int OnGap(ble_gap_event* event, void* arg) {
     if (event->type == BLE_GAP_EVENT_CONNECT) {
         connecting = false;
         if (event->connect.status) {
+            split_diagnostics[cookie & 1].last_error = event->connect.status;
             ESP_LOGW(kTag, "%s connect failed status=%d", (cookie & 1) ? "right" : "left",
                      event->connect.status);
             peer.phase = Phase::Idle;
@@ -917,6 +929,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         Retry();
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                peer.connection == event->disconnect.conn.conn_handle) {
+        split_diagnostics[cookie & 1].last_error = event->disconnect.reason;
         input.Disconnect(cookie & 1);
 #if CONFIG_CUBE_STUDIO_RPC
         for (unsigned index = (cookie & 1) * 2; index < (cookie & 1) * 2 + 2; ++index)
@@ -945,6 +958,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         Retry();
     } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
                peer.connection == event->enc_change.conn_handle) {
+        split_diagnostics[cookie & 1].last_error = event->enc_change.status;
         ESP_LOGI(kTag, "%s encryption status=%d identity_ok=%d",
                  (cookie & 1) ? "right" : "left", event->enc_change.status, Encrypted(peer));
         if (event->enc_change.status || !Encrypted(peer))
@@ -1225,6 +1239,11 @@ void StartCubeSplitBench() {
 }
 
 uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_relaxed); }
+std::string CubeSplitDiagnostics() {
+    const uint32_t now = esp_timer_get_time() / 1000;
+    return "CUBE-SPLIT-DIAG/1 L[" + split_diagnostics[0].Text(now) + "] R[" +
+           split_diagnostics[1].Text(now) + "]";
+}
 void CubeSplitInputTick() {
     for (auto& peer : peers)
         if (peer.phase == Phase::Ready &&

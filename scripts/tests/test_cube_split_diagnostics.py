@@ -1,31 +1,46 @@
-import importlib.util
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('cube_diag', Path(__file__).resolve().parents[1] / 'cube-split-diagnostics.py')
-diag = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(diag)
+ROOT = Path(__file__).resolve().parents[2]
 
 
-class CubeSplitDiagnosticsTest(unittest.TestCase):
-    def test_identity_types(self):
-        self.assertEqual(diag.validate_identity('c1:23:45:67:89:ab', 1), 'C1:23:45:67:89:AB')
-        self.assertEqual(diag.validate_identity('01:23:45:67:89:AB', 0), '01:23:45:67:89:AB')
-        for value in ['01:23:45:67:89:AB', '00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF', 'C1:23:45:67:89:AB x']:
-            with self.assertRaises(ValueError): diag.validate_identity(value, 1)
+class SplitDiagnosticsTests(unittest.TestCase):
+    def test_snapshot_and_wraparound(self):
+        program = r'''
+#include "split_diagnostics.h"
+#include <cassert>
+int main(){
+ cube_dongle::SplitDiagnostics d;
+ assert(d.Text(10).find("adv_age_ms=-1")!=std::string::npos);
+ d.Advertisement(0xfffffff0);d.phase=2;++d.attempts;d.last_error=5;d.failed_phase=2;
+ auto s=d.Text(0x10);
+ assert(s.find("adv=1 adv_age_ms=32")!=std::string::npos);
+ assert(s.find("phase=2")!=std::string::npos);
+ assert(s.find("attempts=1 error=5 failed_phase=2")!=std::string::npos);
+ assert(d.Text(0x10)==s); // Reading does not clear failures or counters.
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'test.cc'
+            path.write_text(program)
+            binary = str(Path(tmp) / 'test')
+            subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                            '-fsanitize=address,undefined', '-I' + str(ROOT / 'experimental/cube_dongle'),
+                            str(path), '-o', binary], check=True)
+            subprocess.run([binary], check=True)
 
-    def test_status_is_input_only(self):
-        state = diag.decode_status('CUBE-SPLIT-BENCH/1 783 HID-OFF')
-        self.assertEqual(state['pressed'], 3)
-        self.assertTrue(state['left_ready'] and state['right_ready'])
-        for response in ['CUBE-CODEX/2', 'CUBE-SPLIT-BENCH/1 0 HID-ON', 'CUBE-SPLIT-BENCH/1 16 HID-OFF', 'CUBE-SPLIT-BENCH/1 65535 HID-OFF']:
-            with self.assertRaises(ValueError): diag.decode_status(response)
+    def test_read_only_command_is_wired(self):
+        sync = (ROOT / 'main/scanner/codex_sync.cc').read_text()
+        self.assertIn('line == "DONGLE SPLIT DIAG"', sync)
+        self.assertIn('Reply(CubeSplitDiagnostics())', sync)
+        source = (ROOT / 'main/scanner/cube_split_bench.cc').read_text()
+        self.assertIn('split_diagnostics[cookie & 1].last_error = event->connect.status;', source)
+        self.assertIn('split_diagnostics[cookie & 1].last_error = event->enc_change.status;', source)
+        self.assertIn('split_diagnostics[cookie & 1].last_error = event->disconnect.reason;', source)
+        self.assertIn('split_diagnostics[Side(peer)].failed_phase', source)
 
-    def test_usb_candidate_status_reports_actual_enable_state(self):
-        self.assertTrue(diag.decode_status('CUBE-USB-CANDIDATE/1 15 HID-ON')['hid_enabled'])
-        self.assertFalse(diag.decode_status('CUBE-USB-CANDIDATE/1 15 HID-OFF')['hid_enabled'])
-        with self.assertRaises(ValueError): diag.validate_identity('C1:23:45:67:89:AB', 2)
 
-    def test_dual_candidate_status(self):
-        self.assertEqual(diag.decode_status('CUBE-DUAL-CANDIDATE/1 15 HID-ON')['variant'], 'DUAL-CANDIDATE')
-        self.assertFalse(diag.decode_status('CUBE-DUAL-CANDIDATE/1 15 HID-OFF')['hid_enabled'])
+if __name__ == '__main__':
+    unittest.main()

@@ -11,6 +11,7 @@ void CubeSplitInputTick();       // NimBLE host thread only; flush delayed combo
 void CubeSplitCancelHoldTaps();  // NimBLE host thread only; no replay after disconnect.
 // Atomic diagnostic: bit0/1 configured L/R, bit2/3 ready L/R, bits8..15 pressed.
 uint32_t CubeSplitBenchStatus();
+std::string CubeSplitDiagnostics();  // Read-only atomic snapshot; never clears bonds.
 std::string CubeSplitBenchBind(const std::string& command);
 FightTelemetry CubeSplitFightTelemetry();
 KeyboardStatus CubeSplitKeyboardStatus();

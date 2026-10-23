@@ -1,23 +1,27 @@
-# Cube split bench USB diagnostics
+# Read-only split reconnect diagnosis
 
-This is for `codex/xingzhi-cube-dongle` input-only test firmware, **not a usable dongle**. Neither USB HID nor computer BLE HID is enabled. A successful compile does not establish actual pairing, low latency or audio coexistence.
+Use `DONGLE SPLIT DIAG` on the normal runtime CDC port (115200). No reboot,
+settings_reset or pairing erasure is needed to query it. Requires this firmware
+update; earlier `DONGLE DIAG` only reports CPU/reset/heap information.
 
-Close Prospector and other serial software before testing. Install `pyserial` in an isolated Python environment. Read-only status:
+`L[...] R[...]` expose atomic diagnostic fields, no device addresses or keys:
 
-```sh
-python scripts/cube-split-diagnostics.py --port /dev/cu.usbmodemYOUR_PORT
-```
+- `phase`: 0 idle, 1 connecting, 2 security, 3 identity, 4 service,
+  5 characteristic, 6 CCC, 7 initial read, 8 ready, 9 closing.
+- `adv`: reports matching the stored identity, including those received during
+  retry cooldown; `adv_age_ms=-1` means no matching report since boot.
+- `attempts`: number of actual connection attempts since boot.
+- `error`: latest connection-start/result, encryption status or disconnect
+  reason. Interpret with phase and repeated snapshots; the code spaces differ.
+- `failed_phase`: last phase passed through `Fail`, -1 if none. Historical value,
+  not proof the current connection is failing. Querying never clears it.
 
-The tool checks `CAPS` and requires a valid `DONGLE` response before any optional configuration write. It reports whether each half has a saved identity, whether its encrypted position subscription is ready, and total held-position count. It does not display typed text. It never flashes, toggles boot/reset, clears Bluetooth bonds or automatically reboots.
+Compare snapshots while the right half remains powered: no matching reports
+points toward advertising/address/discovery; reports plus failed attempts toward
+link establishment; failure at phase 2 toward security/identity restoration;
+later failure toward GATT subscription/initial read. Counters do not establish
+the underlying cause alone. No binding or authentication behavior is changed.
 
-Only when you have verified the two real keyboard identity addresses, provision both sides:
-
-```sh
-python scripts/cube-split-diagnostics.py --port /dev/cu.usbmodemYOUR_PORT \
-  --bind-left C1:23:45:67:89:AB --left-type 1 \
-  --bind-right D1:23:45:67:89:AB --right-type 1
-```
-
-Those addresses are examples, not yours. Type 0 is public; type 1 is static random, not rotating RPA. New bindings are saved one side at a time; if the second write fails, the first remains saved. Reissue valid bindings as needed before manually rebooting. Each address/type pair is one atomic NVS string. After reboot, rerun read-only diagnostics. No identity means no connection attempt. Existing peripheral bonds to an old central can prevent pairing: plan recovery before changing working keyboard firmware, and do not erase settings automatically.
-
-Never install keyboard peripherals expecting immediate typing: complete Cube output transports and real keyboard behaviors are still under development. The normal Codex/XiaoZhi build remains unchanged.
+Host tests cover snapshot formatting, 32-bit uptime wrap and production wiring.
+Full ESP-IDF compilation and reproduction on hardware are still required. The
+source commit deliberately does not trigger Actions.
