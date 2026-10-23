@@ -1,4 +1,4 @@
-2026-10-23 User requested one dongle firmware build.
-Build 7b6537f2a5a38aad2588a4fa2852f219f70f5bcf: preserve in-flight split security and retain independent encryption diagnostic codes.
+2026-10-23 User requested one dongle firmware build after connection optimization.
+Build e055211bcf1e449e1bbdc80ca9fecd307360d636: explicit native ZMK split connection parameters and deferred, bounded security initiation with live-handle checks.
 Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
-No automatic flashing, bond erasure or release replacement. Hardware verification pending.
+No automatic flashing, bond erasure or release replacement. Hardware power-cycle validation pending.
