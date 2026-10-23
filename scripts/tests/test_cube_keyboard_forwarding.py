@@ -16,7 +16,13 @@ class CubeKeyboardForwardingTests(unittest.TestCase):
 
     def test_production_scheduler_on_host(self):
         source=(ROOT/'main/scanner/cube_split_bench.cc').read_text()
-        production=source[source.index('void PublishKeyboardDashboard()'):source.index('void TelemetryTick(')]
+        start = source.index('void PublishKeyboardDashboard()')
+        # Stop at this top-level function's closing brace, not the next named
+        # function: unrelated helpers may legitimately be inserted between them.
+        end = source.index('\n}', start) + 2
+        production = source[start:end]
+        self.assertNotIn('PumpPeerSecurity', production)
+        self.assertTrue(production.rstrip().endswith('}'))
         program=r'''
 #include <cassert>
 #include <mutex>

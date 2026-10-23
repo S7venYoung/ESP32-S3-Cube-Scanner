@@ -1,4 +1,4 @@
-2026-10-23 User requested one dongle firmware build after connection optimization.
-Build e055211bcf1e449e1bbdc80ca9fecd307360d636: explicit native ZMK split connection parameters and deferred, bounded security initiation with live-handle checks.
-Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
-No automatic flashing, bond erasure or release replacement. Hardware power-cycle validation pending.
+2026-10-23 Retry dongle build after fixing scheduler-test source extraction.
+Build latest 08c404f6a6b6306f93ba310bd1192fef6f510f22 plus narrowly bounded production-function extraction. Keep deferred split security and native connection parameters unchanged.
+Focused forwarding (3) and security (2) host tests pass; do not skip tests.
+Cube USB+BLE dongle only. No scanner, USB-only, companion or keyboard-half builds. No automatic flashing or bond erasure.
