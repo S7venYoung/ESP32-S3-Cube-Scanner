@@ -239,11 +239,17 @@ bool ValidIdentity(const ble_addr_t& address) {
     return cube_dongle::ParseIdentity(text, address.type & 1, parsed);
 }
 int Gap(ble_gap_event*, void*);
+// A fresh connection can expose the computer's rotating private address until
+// identity resolution / SMP completes. Never persist this address as a profile.
+bool UnresolvedPrivate(const ble_addr_t& address) {
+    return address.type == BLE_ADDR_RANDOM && (address.val[5] & 0xc0) == 0x40;
+}
 void AuthorizeAfterPersistence() {
-    security_pending = false;
     ble_gap_conn_desc desc{};
-    bool valid = !ble_gap_conn_find(connection, &desc) && desc.sec_state.encrypted &&
-                 desc.sec_state.bonded && ValidIdentity(desc.peer_id_addr) &&
+    if (ble_gap_conn_find(connection, &desc) || !desc.sec_state.encrypted)
+        return;  // The existing security deadline bounds every pending attempt.
+    bool valid = desc.sec_state.bonded && ValidIdentity(desc.peer_id_addr) &&
+                 !UnresolvedPrivate(desc.peer_id_addr) &&
                  !CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1);
     ble_store_key_sec key{};
     ble_store_value_sec our{}, peer{};
@@ -251,9 +257,13 @@ void AuthorizeAfterPersistence() {
     key.peer_addr.type &= 1;
     // ENC_CHANGE precedes identity update and key persistence on fresh pairing.
     // Authorize only from a subsequent host event after both SC keys are stored.
-    valid = valid && !ble_store_read_our_sec(&key, &our) && !ble_store_read_peer_sec(&key, &peer) &&
+    const bool persisted = valid && !ble_store_read_our_sec(&key, &our) && !ble_store_read_peer_sec(&key, &peer) &&
             our.ltk_present && peer.ltk_present && our.sc && peer.sc && our.key_size == 16 &&
             peer.key_size == 16;
+    if (!persisted && esp_timer_get_time() < security_deadline)
+        return;  // Retry on the host timer; never grant GATT/HID access early.
+    security_pending = false;
+    valid = persisted;
     for (unsigned i = 0; i < 5; ++i)
         if (i != selected && profiles[i].bound && Same(profiles[i].identity, desc.peer_id_addr))
             valid = false;
@@ -270,6 +280,7 @@ void AuthorizeAfterPersistence() {
             last_result = -1;
     }
     authorized = valid;
+    ESP_LOGI(kTag, "BLE profile=%u authorization=%d persisted=%d", selected + 1, valid, persisted);
     ReleaseBle();
     if (routed_ble)
         barrier.Begin();
@@ -382,16 +393,20 @@ int Gap(ble_gap_event* event, void* arg) {
         ble_gap_conn_desc desc{};
         if (ble_gap_conn_find(connection, &desc) ||
             CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1) ||
-            (profiles[selected].bound && !Same(profiles[selected].identity, desc.peer_id_addr)) ||
+            (profiles[selected].bound && !Same(profiles[selected].identity, desc.peer_id_addr) &&
+             !UnresolvedPrivate(desc.peer_id_addr)) ||
             (!profiles[selected].bound && esp_timer_get_time() >= pairing_until)) {
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             return 0;
         }
-        security_deadline = esp_timer_get_time() + 15000000;
+        ESP_LOGI(kTag, "BLE profile=%u connected; securing", selected + 1);
+        security_deadline = esp_timer_get_time() + 30000000;
         if (ble_gap_security_initiate(connection))
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                connection == event->disconnect.conn.conn_handle) {
+        ESP_LOGI(kTag, "BLE profile=%u disconnected reason=%d", selected + 1,
+                 event->disconnect.reason);
         connection = BLE_HS_CONN_HANDLE_NONE;
 #if CONFIG_CUBE_STUDIO_RPC
         studio_subscribed = false;
@@ -408,6 +423,8 @@ int Gap(ble_gap_event* event, void* arg) {
         Advertise();
     } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
                connection == event->enc_change.conn_handle) {
+        ESP_LOGI(kTag, "BLE profile=%u encryption status=%d", selected + 1,
+                 event->enc_change.status);
         authorized = false;
         security_pending = !event->enc_change.status;
         ReleaseBle();

@@ -25,3 +25,23 @@ UBSan. Covers cooldown expiry within the same scan, both sides, directed adverts
 unknown devices, steady-state duty and no-work guards. Full ESP-IDF build and
 physical power-cycle reconnect verification remain required. No build is
 automatically triggered by this source-only commit.
+
+## Computer BLE host authorization
+
+On a bound profile, allow only an unresolved random resolvable-private address
+to proceed to SMP before the final identity comparison. All other mismatching
+identities remain rejected at connect. A private address is never stored as a
+profile. Final authorization still requires the selected identity (and no other
+slot owning that identity), encryption, bonding and both persisted SC / 16-byte
+LTKs. Missing identity/key persistence waits on the existing host timer instead
+of immediately terminating; the security deadline is 30 seconds. Invalid or
+missing security material never grants access and times out. No auto-erasure or
+unpaired-BLE USB fallback is introduced.
+
+This follows the distinction between OTA addresses, identity events and key
+storage in [NimBLE's security manager](https://github.com/apache/mynewt-nimble/blob/master/nimble/host/src/ble_sm.c).
+The host shim executes the production authorization function for delayed keys,
+RPA-to-identity transition, reconnect, wrong slots, short keys, expired pairing
+window, save failure and split-peer rejection. These are regression fixes for
+observed code-level risks; actual Mac pairing failure still needs hardware logs
+and a firmware test to confirm the cause.
