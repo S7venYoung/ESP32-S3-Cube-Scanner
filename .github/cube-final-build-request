@@ -1,4 +1,4 @@
-2026-10-23 User requested one dongle diagnostic firmware build.
-Build 1101bed4290c59d3585d5f71e1c29f73a56706b3: runtime CDC per-half advertisement, connection and security diagnostics, including prior reconnect and computer BLE fixes.
+2026-10-23 User requested one dongle firmware build.
+Build 7b6537f2a5a38aad2588a4fa2852f219f70f5bcf: preserve in-flight split security and retain independent encryption diagnostic codes.
 Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
-No automatic flashing, pairing erasure or release replacement. Right-half reconnect root cause is still under investigation.
+No automatic flashing, bond erasure or release replacement. Hardware verification pending.
