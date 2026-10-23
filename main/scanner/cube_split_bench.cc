@@ -276,7 +276,7 @@ void PublishStatus() {
 int OnGap(ble_gap_event* event, void* arg);
 void Scan(ble_npl_event*);
 
-void Retry() { ble_npl_callout_reset(&retry, ble_npl_time_ms_to_ticks32(2000)); }
+void Retry() { ble_npl_callout_reset(&retry, ble_npl_time_ms_to_ticks32(250)); }
 void* Cookie(size_t side) { return reinterpret_cast<void*>((peers[side].generation << 1) | side); }
 Peer* Current(uint16_t conn, void* arg) {
     const auto cookie = reinterpret_cast<uintptr_t>(arg);
@@ -471,7 +471,7 @@ void Fail(Peer& peer, const char* reason) {
         peer.phase = Phase::Idle;
         peer.learning = false;
         ++peer.generation;
-        peer.retry_after = esp_timer_get_time() + 5000000;
+        peer.retry_after = esp_timer_get_time() + 1000000;
         Retry();
     } else if (rc)
         ESP_LOGE(kTag, "Terminate failed: %d; peer remains quarantined", rc);
@@ -656,7 +656,8 @@ int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void
     PublishStatus();
     ble_npl_callout_stop(&peer->timeout);
     OptionalSubscribe(*peer);
-    ESP_LOGI(kTag, "%s ready, encrypted input only; HID OFF", Side(*peer) ? "right" : "left");
+    ESP_LOGI(kTag, "%s ready uptime_ms=%lld", Side(*peer) ? "right" : "left",
+             static_cast<long long>(esp_timer_get_time() / 1000));
     return 0;
 }
 int OnSubscribed(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr*, void* arg) {
@@ -802,6 +803,7 @@ void Discover(Peer& peer) {
         Fail(peer, "cannot discover split service");
 }
 void Connect(Peer& peer) {
+    ESP_LOGI(kTag, "%s connecting (bound=%d)", Side(peer) ? "right" : "left", peer.configured);
     connecting = true;
     peer.phase = Phase::Connecting;
     peer.learning = !peer.configured;
@@ -812,9 +814,10 @@ void Connect(Peer& peer) {
     const int rc =
         ble_gap_connect(own_address_type, &peer.address, 10000, nullptr, OnGap, Cookie(Side(peer)));
     if (rc) {
+        ESP_LOGW(kTag, "%s connect start failed rc=%d", Side(peer) ? "right" : "left", rc);
         peer.phase = Phase::Idle;
         peer.learning = false;
-        peer.retry_after = esp_timer_get_time() + 5000000;
+        peer.retry_after = esp_timer_get_time() + 1000000;
         connecting = false;
         Retry();
     }
@@ -888,10 +891,13 @@ int OnGap(ble_gap_event* event, void* arg) {
     if (event->type == BLE_GAP_EVENT_CONNECT) {
         connecting = false;
         if (event->connect.status) {
+            ESP_LOGW(kTag, "%s connect failed status=%d", (cookie & 1) ? "right" : "left",
+                     event->connect.status);
             peer.phase = Phase::Idle;
             peer.learning = false;
-            peer.retry_after = esp_timer_get_time() + 5000000;
+            peer.retry_after = esp_timer_get_time() + 1000000;
         } else {
+            ESP_LOGI(kTag, "%s connected; securing", (cookie & 1) ? "right" : "left");
             peer.connection = event->connect.conn_handle;
             peer.phase = Phase::Security;
             peer.service_start = peer.service_end = peer.value = peer.ccc = 0;
@@ -932,12 +938,15 @@ int OnGap(ble_gap_event* event, void* arg) {
         peer.phase = Phase::Idle;
         peer.learning = false;
         ++peer.generation;
-        peer.retry_after = esp_timer_get_time() + 5000000;
-        ESP_LOGI(kTag, "%s disconnected; its positions released", (cookie & 1) ? "right" : "left");
+        peer.retry_after = esp_timer_get_time() + 1000000;
+        ESP_LOGI(kTag, "%s disconnected reason=%d; positions released",
+                 (cookie & 1) ? "right" : "left", event->disconnect.reason);
         PublishStatus();
         Retry();
     } else if (event->type == BLE_GAP_EVENT_ENC_CHANGE &&
                peer.connection == event->enc_change.conn_handle) {
+        ESP_LOGI(kTag, "%s encryption status=%d identity_ok=%d",
+                 (cookie & 1) ? "right" : "left", event->enc_change.status, Encrypted(peer));
         if (event->enc_change.status || !Encrypted(peer))
             Fail(peer, "security failed; bonds NOT deleted");
         else if (peer.phase == Phase::Security)
@@ -992,9 +1001,13 @@ void Scan(ble_npl_event*) {
         return;
     ble_gap_disc_params params{};
     params.passive = 1;
-    params.itvl = 0x100;
-    params.window = 0x30;
-    params.filter_duplicates = 1;
+    // Fast acquisition at boot; keep steady-state radio cost bounded afterwards.
+    const bool startup = esp_timer_get_time() < 60000000;
+    params.itvl = startup ? 0x60 : 0x100;
+    params.window = startup ? 0x48 : 0x30;
+    // A report seen during retry_after must be delivered again once eligible.
+    // Otherwise duplicate filtering can hide a bonded half for the entire scan.
+    params.filter_duplicates = 0;
     candidates[0] = {};
     candidates[1] = {};
     if (ble_gap_disc(own_address_type, 5000, &params, OnGap, nullptr))
