@@ -81,6 +81,8 @@ struct Peer {
     uint16_t service_start = 0, service_end = 0, value = 0, char_end = 0, ccc = 0;
     bool notified_during_read = false;
     int64_t retry_after = 0;
+    int64_t security_after = 0;
+    bool security_started = false;
     ble_npl_callout timeout{};
     cube_dongle::TypingActivity typing;
     int battery = -1;
@@ -571,11 +573,38 @@ void PublishKeyboardDashboard() {
     }
 }
 
+void Discover(Peer& peer);
+void PumpPeerSecurity(Peer& peer, int64_t now) {
+    if (peer.phase != Phase::Security || peer.security_started || now < peer.security_after)
+        return;
+    ble_gap_conn_desc desc{};
+    if (ble_gap_conn_find(peer.connection, &desc)) {
+        split_diagnostics[Side(peer)].security_start = BLE_HS_ENOTCONN;
+        Fail(peer, "connection disappeared before security start");
+        return;
+    }
+    if (Encrypted(peer)) {
+        peer.security_started = true;
+        Discover(peer);
+        return;
+    }
+    const int security_rc = ble_gap_security_initiate(peer.connection);
+    split_diagnostics[Side(peer)].security_start = security_rc;
+    if (!security_rc || security_rc == BLE_HS_EALREADY) {
+        peer.security_started = true;
+    } else if (security_rc == BLE_HS_EBUSY || security_rc == BLE_HS_EAGAIN) {
+        peer.security_after = now + 100000;  // Still bounded by the handshake timeout.
+    } else {
+        split_diagnostics[Side(peer)].last_error = security_rc;
+        Fail(peer, "cannot initiate security");
+    }
+}
 void TelemetryTick(ble_npl_event*) {
     const auto now = esp_timer_get_time();
     static const ble_uuid16_t battery_uuid = BLE_UUID16_INIT(0x2a19);
     for (size_t side = 0; side < 2; ++side) {
         auto& peer = peers[side];
+        PumpPeerSecurity(peer, now);
         if (peer.phase == Phase::Ready && peer.caps_requested && !peer.caps_pending &&
             !peer.optional_pending && peer.channel_at == peer.channel_count &&
             !peer.battery_pending && now >= peer.battery_next) {
@@ -816,8 +845,16 @@ void Connect(Peer& peer) {
     peer.pending_positions = {};
     ++peer.generation;
     ble_gap_disc_cancel();
+    // Match native ZMK split defaults: 7.5 ms interval, latency 30, 4 s supervision.
+    // Do not inherit NimBLE's generic computer/peripheral connection defaults.
+    ble_gap_conn_params params{};
+    params.scan_itvl = 0x60;
+    params.scan_window = 0x30;
+    params.itvl_min = params.itvl_max = 6;
+    params.latency = 30;
+    params.supervision_timeout = 400;
     const int rc =
-        ble_gap_connect(own_address_type, &peer.address, 10000, nullptr, OnGap, Cookie(Side(peer)));
+        ble_gap_connect(own_address_type, &peer.address, 10000, &params, OnGap, Cookie(Side(peer)));
     if (rc) {
         ESP_LOGW(kTag, "%s connect start failed rc=%d", Side(peer) ? "right" : "left", rc);
         split_diagnostics[Side(peer)].last_error = rc;
@@ -912,6 +949,8 @@ int OnGap(ble_gap_event* event, void* arg) {
             ESP_LOGI(kTag, "%s connected; securing", (cookie & 1) ? "right" : "left");
             peer.connection = event->connect.conn_handle;
             peer.phase = Phase::Security;
+            peer.security_started = false;
+            peer.security_after = esp_timer_get_time() + 100000;
             peer.service_start = peer.service_end = peer.value = peer.ccc = 0;
             peer.notified_during_read = false;
             peer.channels = {};
@@ -921,18 +960,8 @@ int OnGap(ble_gap_event* event, void* arg) {
             peer.relay.Reset();
             relay_ready.fetch_and(~(1u << (cookie & 1)));
             ble_npl_callout_reset(&peer.timeout, ble_npl_time_ms_to_ticks32(15000));
-            if (Encrypted(peer))
-                Discover(peer);
-            else {
-                const int security_rc = ble_gap_security_initiate(peer.connection);
-                split_diagnostics[cookie & 1].security_start = security_rc;
-                // The peripheral can start SMP before our CONNECT callback.
-                // EALREADY is an active handshake, not a failed authentication.
-                if (security_rc && security_rc != BLE_HS_EALREADY) {
-                    split_diagnostics[cookie & 1].last_error = security_rc;
-                    Fail(peer, "cannot initiate security");
-                }
-            }
+            // Defer SMP until a later host event, not inside CONNECT dispatch.
+            // PumpPeerSecurity rechecks the live handle and encryption state.
         }
         Retry();
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
