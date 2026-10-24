@@ -110,6 +110,66 @@ int main(){for(int type:{1,2}){
         self.assertLess(tail.index('ble_hs_cfg.store_delete_cb = DeleteBondWithRecovery'), tail.index('nimble_port_freertos_init(Host)'))
         self.assertNotIn('nvs_flash_erase', tail)
 
+    def test_reinstall_after_sdk_startup_before_any_gap_procedure(self):
+        source = (ROOT / 'main/scanner/cube_split_bench.cc').read_text()
+        sync = source[source.index('void OnSync() {'):source.index('void OnReset(')]
+        recovery = sync.index('RecoverBondJournal()')
+        write = sync.index('ble_hs_cfg.store_write_cb = PersistBondUpdate;')
+        delete = sync.index('ble_hs_cfg.store_delete_cb = DeleteBondWithRecovery;')
+        for operation in ['ble_hs_util_ensure_addr(', 'CubeBleHostSync(',
+                          'TelemetryTick(nullptr)', 'Scan(nullptr)']:
+            self.assertLess(recovery, sync.index(operation))
+            self.assertLess(write, sync.index(operation))
+            self.assertLess(delete, sync.index(operation))
+        self.assertIn('return;', sync[recovery:write])
+        # OnSync can run after a host reset too: do not hide reinstallation
+        # behind the one-time callout-initialization guard.
+        self.assertLess(delete, sync.index('if (!callouts_initialized)'))
+        self.assertNotIn('ble_store_config_init()', sync[sync.index('if (RecoverBondJournal()'):])
+
+    def test_production_sync_reinstalls_overwritten_callbacks(self):
+        source = (ROOT / 'main/scanner/cube_split_bench.cc').read_text()
+        begin = source.index('void OnSync() {')
+        end = source.index('    if (ble_hs_util_ensure_addr(', begin)
+        production = source[begin:end] + '}\n'
+        program = r'''
+#include <cassert>
+#define ESP_LOGE(...) ((void)0)
+int PersistBondUpdate(int, const void*) {return 0;}
+int DeleteBondWithRecovery(int, const void*) {return 0;}
+int DefaultWrite(int, const void*) {return 0;}
+int DefaultDelete(int, const void*) {return 0;}
+struct Config {int (*store_write_cb)(int,const void*);
+               int (*store_delete_cb)(int,const void*);} ble_hs_cfg;
+bool bond_store_hooks_active=false;
+int recovery_result=0,recoveries=0;
+int RecoverBondJournal(){++recoveries;return recovery_result;}
+void SdkStartup(){ble_hs_cfg={DefaultWrite,DefaultDelete};}
+''' + production + r'''
+int main(){
+ // Model pre-host hooks being overwritten by IDF dynamic-memory startup.
+ ble_hs_cfg={PersistBondUpdate,DeleteBondWithRecovery};
+ SdkStartup();assert(ble_hs_cfg.store_write_cb!=PersistBondUpdate);
+ OnSync();assert(bond_store_hooks_active&&recoveries==1);
+ assert(ble_hs_cfg.store_write_cb==PersistBondUpdate);
+ assert(ble_hs_cfg.store_delete_cb==DeleteBondWithRecovery);
+ // A host reset repeats SDK initialization, so installation must repeat too.
+ SdkStartup();OnSync();assert(recoveries==2&&bond_store_hooks_active);
+ assert(ble_hs_cfg.store_write_cb==PersistBondUpdate);
+ assert(ble_hs_cfg.store_delete_cb==DeleteBondWithRecovery);
+ SdkStartup();recovery_result=28;OnSync();
+ assert(!bond_store_hooks_active&&recoveries==3);
+ assert(ble_hs_cfg.store_write_cb==DefaultWrite);
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'sync.cc'
+            path.write_text(program)
+            binary = str(Path(tmp) / 'sync')
+            subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                            '-fsanitize=address,undefined', str(path), '-o', binary], check=True)
+            subprocess.run([binary], check=True)
+
 
 if __name__ == '__main__':
     unittest.main()

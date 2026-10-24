@@ -328,6 +328,7 @@ KeyboardStatus keyboard_cache;
 bool connecting = false;
 bool callouts_initialized = false;
 uint8_t own_address_type = 0;
+std::atomic<bool> bond_store_hooks_active{false};
 std::atomic<uint32_t> status_word{0};
 
 void PublishStatus() {
@@ -948,6 +949,8 @@ void Discover(Peer& peer) {
 }
 void Connect(Peer& peer) {
     ++split_diagnostics[Side(peer)].attempts;
+    split_diagnostics[Side(peer)].security_start = -1;
+    split_diagnostics[Side(peer)].encryption_status = -1;
     ESP_LOGI(kTag, "%s connecting (bound=%d)", Side(peer) ? "right" : "left", peer.configured);
     connecting = true;
     peer.phase = Phase::Connecting;
@@ -1053,6 +1056,7 @@ int OnGap(ble_gap_event* event, void* arg) {
         connecting = false;
         if (event->connect.status) {
             split_diagnostics[cookie & 1].last_error = event->connect.status;
+            split_diagnostics[cookie & 1].failed_phase = static_cast<int>(peer.phase);
             ESP_LOGW(kTag, "%s connect failed status=%d", (cookie & 1) ? "right" : "left",
                      event->connect.status);
             peer.phase = Phase::Idle;
@@ -1080,6 +1084,7 @@ int OnGap(ble_gap_event* event, void* arg) {
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                peer.connection == event->disconnect.conn.conn_handle) {
         split_diagnostics[cookie & 1].last_error = event->disconnect.reason;
+        split_diagnostics[cookie & 1].failed_phase = static_cast<int>(peer.phase);
         input.Disconnect(cookie & 1);
 #if CONFIG_CUBE_STUDIO_RPC
         for (unsigned index = (cookie & 1) * 2; index < (cookie & 1) * 2 + 2; ++index)
@@ -1216,6 +1221,17 @@ void LoadBinding(Peer& peer, const char* key, const char* fallback, int fallback
 #endif
 }
 void OnSync() {
+    bond_store_hooks_active = false;
+    // IDF 6.1's dynamic-memory startup calls ble_store_config_init() again while
+    // loading the local IRK. That restores the SDK callbacks, overwriting our
+    // pre-host hooks. Reinstall only after startup finishes, before any GAP work.
+    if (RecoverBondJournal()) {
+        ESP_LOGE(kTag, "Bond recovery after host startup failed; scanning not started");
+        return;
+    }
+    ble_hs_cfg.store_write_cb = PersistBondUpdate;
+    ble_hs_cfg.store_delete_cb = DeleteBondWithRecovery;
+    bond_store_hooks_active = true;
     if (ble_hs_util_ensure_addr(0) || ble_hs_id_infer_auto(0, &own_address_type))
         return;
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
@@ -1239,6 +1255,7 @@ void OnSync() {
     Scan(nullptr);
 }
 void OnReset(int reason) {
+    bond_store_hooks_active = false;
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioCancelMacros();
 #endif
@@ -1403,7 +1420,8 @@ uint32_t CubeSplitBenchStatus() { return status_word.load(std::memory_order_rela
 std::string CubeSplitDiagnostics() {
     const uint32_t now = esp_timer_get_time() / 1000;
     return "CUBE-SPLIT-DIAG/1 L[" + split_diagnostics[0].Text(now) + "] R[" +
-           split_diagnostics[1].Text(now) + "]";
+           split_diagnostics[1].Text(now) + "] store_sync=2 store_hooks=" +
+           std::to_string(bond_store_hooks_active.load());
 }
 void CubeSplitInputTick() {
     for (auto& peer : peers)
