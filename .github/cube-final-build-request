@@ -1,4 +1,4 @@
-2026-10-24 Continue user-requested computer BLE investigation; build once after changes.
-Source 0aef8a808deab5648bc82519ce6865eaba86abe6: measure connection, L2CAP and GATT pool admission after failed connectable advertising. No guessed pool-size changes.
-USB+BLE Cube dongle only. No scanner, USB-only, keyboard-half or macOS builds.
-Preserve pairings and accepted split reconnect. Diagnostic build only, not a claimed fix; no automatic flashing or release replacement.
+2026-10-24 Continue requested dongle repair and build once.
+Source 328d5357db5531c3b7531b3ac4cc49a5b1e89cbc: preserve delayed computer CONNECT callbacks across failed advertising retries; 7 relevant host tests passed.
+USB+BLE Cube dongle only. Preserve pool sizes, existing split reconnect, keys and profiles.
+No automatic flashing, release replacement, scanner/USB-only/keyboard/companion builds. Hardware validation pending.
