@@ -15,7 +15,8 @@ enum class HostCommand : uint8_t {
     Enable,
     Disable,
     Next,
-    ClearSlot
+    ClearSlot,
+    Repair
 };
 struct HostRequest {
     HostCommand command = HostCommand::None;
@@ -37,6 +38,8 @@ inline bool ParseHostCommand(const std::string& line, HostRequest& out) {
         request.command = HostCommand::ClearAll;
     else if (line == "DONGLE BT PAIR")
         request.command = HostCommand::Pair;
+    else if (line == "DONGLE BT REPAIR")
+        request.command = HostCommand::Repair;
     else if (line == "DONGLE OUTPUT AUTO")
         request.command = HostCommand::Auto;
     else if (line == "DONGLE OUTPUT USB")

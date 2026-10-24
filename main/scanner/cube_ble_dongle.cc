@@ -56,6 +56,14 @@ struct Profile {
     ble_addr_t identity{};
 };
 Profile profiles[5];
+struct BondRepairCandidate {
+    bool valid = false;
+    unsigned profile = 0;
+    int64_t expires = 0;
+    ble_addr_t identity{};
+} repair_candidate;
+bool RepairCandidateValid();
+void RememberRepairCandidate(uint16_t handle);
 unsigned selected = 0;
 enum class Output { Auto, Usb, Ble };
 Output preference = Output::Auto;
@@ -184,6 +192,7 @@ int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
 }
 #endif
 void Publish() {
+    host_diagnostics.repair_ready = RepairCandidateValid();
     ble_gap_conn_desc diagnostic_connection{};
     const bool link = connection != BLE_HS_CONN_HANDLE_NONE &&
                       !ble_gap_conn_find(connection, &diagnostic_connection);
@@ -602,6 +611,8 @@ int Gap(ble_gap_event* event, void* arg) {
         }
     } else if (event->type == BLE_GAP_EVENT_REPEAT_PAIRING) {
         ++host_diagnostics.repeats;
+        if (event->repeat_pairing.conn_handle == connection)
+            RememberRepairCandidate(connection);
         return BLE_GAP_REPEAT_PAIRING_IGNORE;  // clear the selected computer slot explicitly
     }
     Publish();
@@ -794,6 +805,52 @@ bool ClearSlot(unsigned slot) {
     profiles[slot] = {};
     return true;
 }
+bool RepairCandidateValid() {
+    if (!repair_candidate.valid || repair_candidate.profile != selected ||
+        esp_timer_get_time() >= repair_candidate.expires ||
+        !ValidIdentity(repair_candidate.identity) || UnresolvedPrivate(repair_candidate.identity) ||
+        CubeSplitIsKeyboard(repair_candidate.identity.val, repair_candidate.identity.type & 1))
+        return false;
+    if (profiles[selected].bound && !Same(profiles[selected].identity, repair_candidate.identity))
+        return false;
+    for (unsigned i = 0; i < 5; ++i)
+        if (i != selected && profiles[i].bound && Same(profiles[i].identity, repair_candidate.identity))
+            return false;  // Never delete a different slot's bond.
+    return true;
+}
+void RememberRepairCandidate(uint16_t handle) {
+    repair_candidate.valid = false;
+    ble_gap_conn_desc desc{};
+    if (handle != connection || ble_gap_conn_find(handle, &desc))
+        return;
+    repair_candidate.identity = desc.peer_id_addr;
+    repair_candidate.identity.type &= 1;
+    repair_candidate.profile = selected;
+    repair_candidate.expires = esp_timer_get_time() + 120000000;
+    repair_candidate.valid = true;
+    if (!RepairCandidateValid())
+        repair_candidate.valid = false;
+}
+bool RepairComputerBond() {
+    if (!RepairCandidateValid()) {
+        last_result = -6;  // No recent, unambiguous target on this selected slot.
+        return false;
+    }
+    if (profiles[selected].bound) {
+        if (!ClearSlot(selected))
+            return false;
+    } else {
+        // Orphaned computer key: not owned by any slot, but observed in this
+        // slot's most recent REPEAT_PAIRING. Delete only that exact identity.
+        const int rc = ble_store_util_delete_peer(&repair_candidate.identity);
+        if (rc && rc != BLE_HS_ENOENT) {
+            last_result = rc;
+            return false;
+        }
+    }
+    repair_candidate.valid = false;
+    return true;
+}
 bool WantBle() {
     return preference == Output::Ble || (preference == Output::Auto && !CubeUsbAttached());
 }
@@ -802,6 +859,15 @@ bool OldReleased() {
                    : (!CubeUsbAttached() || CubeUsbNeutralDelivered());
 }
 void BeginTransition(HostRequest request) {
+    if (request.command == HostCommand::Repair && !RepairCandidateValid()) {
+        last_result = command_result = -6;
+        if (pending_ticket)
+            done_ticket = pending_ticket;
+        Notice(3);
+        return;
+    }
+    if (request.command != HostCommand::Repair)
+        repair_candidate.valid = false;
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioCancelMacros();
 #endif
@@ -855,14 +921,22 @@ void ApplyPending() {
         next_output = Output::Usb;
     if (request.command == HostCommand::Ble)
         next_output = Output::Ble;
+    if (request.command == HostCommand::Repair)
+        next_output = Output::Ble;
     if (request.command == HostCommand::Select || request.command == HostCommand::Clear ||
-        request.command == HostCommand::ClearAll || request.command == HostCommand::ClearSlot) {
+        request.command == HostCommand::ClearAll || request.command == HostCommand::ClearSlot ||
+        request.command == HostCommand::Repair) {
         if (connection != BLE_HS_CONN_HANDLE_NONE) {
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             return;
         }
     }
     bool okay = SaveSelection(next_profile, next_output);
+    if (request.command == HostCommand::Repair) {
+        last_result = -1;
+        if (okay)
+            okay = RepairComputerBond();
+    }
     if (okay && request.command == HostCommand::Clear)
         okay = ClearSlot(selected);
     if (okay && request.command == HostCommand::ClearSlot)
@@ -881,10 +955,11 @@ void ApplyPending() {
         if (request.command == HostCommand::Disable)
             enabled = false;
         if (request.command == HostCommand::Pair || request.command == HostCommand::Select ||
-            request.command == HostCommand::Clear || request.command == HostCommand::ClearAll)
+            request.command == HostCommand::Clear || request.command == HostCommand::ClearAll ||
+            request.command == HostCommand::Repair)
             pairing_until = profiles[selected].bound ? 0 : esp_timer_get_time() + 120000000;
         last_result = 0;
-    } else
+    } else if (request.command != HostCommand::Repair)
         last_result = -1;
     routed_ble = WantBle();
     if (pending_ticket) {
@@ -991,6 +1066,7 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+    repair_candidate.valid = false;
     CubeUsbRelease();  // USB must release even while the shared radio host is down.
     physical_input = {};
     physical_neutral = keyboard_neutral = true;
@@ -1066,7 +1142,8 @@ void CubeDualTick() {
         // Keep the request until the disconnect callback has completed.
         if ((pending.command == HostCommand::Select || pending.command == HostCommand::Clear ||
              pending.command == HostCommand::ClearAll ||
-             pending.command == HostCommand::ClearSlot) &&
+             pending.command == HostCommand::ClearSlot ||
+             pending.command == HostCommand::Repair) &&
             connection != BLE_HS_CONN_HANDLE_NONE)
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
         else

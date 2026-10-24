@@ -123,3 +123,31 @@ reentrant starts and reset cancellation. No pool sizes, bonding, security gates,
 split connection logic or existing Release are changed. Hardware acceptance is
 still needed with both halves and the Mac: pairing, HID typing, host cycling,
 Cube power cycling, and confirming no untracked third connection remains.
+
+## Explicit, one-computer bond repair (USB command)
+
+An existing unowned key can trigger REPEAT_PAIRING while the selected slot is
+unbound. The old CLEAR command skips unbound slots and cannot remove this orphan.
+Do not use CLEAR ALL or reset keyboard bonds as a workaround.
+
+On a fresh REPEAT_PAIRING from the current computer connection, the firmware
+remembers the resolved public/static identity in RAM for 120 seconds. It never
+deletes a key automatically or accepts repeated pairing silently. The read-only
+host status includes `REPAIR-READY=1` only if the target still belongs to the
+selected slot (or is unowned), is not a split identity/RPA, and is not assigned
+to any other computer slot. Host reset and any other host command invalidate it.
+
+After the user explicitly authorizes this computer's repair, issue
+`DONGLE BT REPAIR` over USB. The normal neutral-input/disconnect transition runs
+first. The target is revalidated before deletion. A bound selected slot uses its
+existing exact-peer ClearSlot; an unbound slot deletes only the observed orphan
+identity. Other slots and all split/Wi-Fi/XiaoZhi state remain untouched. An
+unknown/expired/ambiguous target returns result -6 and deletes nothing. A target
+already bound to another slot must instead be repaired on that slot explicitly.
+Success consumes the candidate, switches to BLE and opens a 120-second pairing
+window. Try pairing the same Mac again, then verify encrypted/authorized HID.
+
+Only one computer was authorized for this investigation; the new command is not
+permission to clear any other pairing. No real device key has yet been deleted
+by the code changes or tests. Flash the new build, reproduce the Mac's pairing
+request, read REPAIR-READY, then perform the authorized command once.

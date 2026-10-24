@@ -12,6 +12,7 @@ struct HostDiagnostics {
     std::atomic<uint32_t> pool_connection{0xffffffff}, pool_channels{0xffffffff},
         pool_gatt{0xffffffff}, nimble_limit{0};
     std::atomic<bool> pool_scan_complete{false};
+    std::atomic<bool> repair_ready{false};
     std::atomic<int> adv_stage{0}, adv_rc{0}, connect_rc{-1}, security_rc{-1},
         encryption_rc{-1}, disconnect_reason{-1}, auth_reason{0}, keys{0};
     void NewConnection() {
@@ -55,7 +56,8 @@ struct HostDiagnostics {
                " POOL-GATT=" + pools.gatt.Text() +
                " POOL-BLOCKED=" + std::to_string(pools.Blocked()) +
                " POOL-MISSING=" + std::to_string(pools.Missing()) +
-               " POOL-SCAN-COMPLETE=" + std::to_string(pool_scan_complete.load());
+               " POOL-SCAN-COMPLETE=" + std::to_string(pool_scan_complete.load()) +
+               " REPAIR-READY=" + std::to_string(repair_ready.load());
     }
 };
 }  // namespace cube_dongle
