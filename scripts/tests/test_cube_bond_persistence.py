@@ -27,24 +27,32 @@ using nvs_handle_t=int;
 std::map<int,std::map<int,ble_store_value>> ram,disk;
 std::vector<uint8_t> journal,staged;
 bool fail_commit=false,fail_write=false,fail_delete=false,fail_open=false;
-int nvs_open(const char*,int mode,int* handle){if(fail_open)return 99;
- if(mode==NVS_READONLY&&journal.empty())return ESP_ERR_NVS_NOT_FOUND;
+int nvs_open(const char*,int mode,int* handle){if(fail_open){return 99;}
+ if(mode==NVS_READONLY&&journal.empty()){return ESP_ERR_NVS_NOT_FOUND;}
  *handle=mode;staged=journal;return 0;}
 int nvs_set_blob(int,const char*,const void* p,size_t n){staged.assign((const uint8_t*)p,(const uint8_t*)p+n);return 0;}
-int nvs_get_blob(int,const char*,void* p,size_t* n){if(journal.empty())return ESP_ERR_NVS_NOT_FOUND;
- if(*n<journal.size())return 99;*n=journal.size();std::memcpy(p,journal.data(),*n);return 0;}
+int nvs_get_blob(int,const char*,void* p,size_t* n){
+ if(journal.empty()){return ESP_ERR_NVS_NOT_FOUND;}
+ if(*n<journal.size()){return 99;}
+ *n=journal.size();
+ std::memcpy(p,journal.data(),*n);
+ return 0;
+}
 int nvs_erase_key(int,const char*){staged.clear();return 0;}
-int nvs_commit(int){if(fail_commit)return 99;journal=staged;return 0;}
+int nvs_commit(int){if(fail_commit){return 99;}journal=staged;return 0;}
 void nvs_close(int){}
 int ble_store_config_read(int t,const ble_store_key* k,ble_store_value* out){
- auto it=ram[t].find(k->sec.peer_addr.val[0]);if(it==ram[t].end())return BLE_HS_ENOENT;
+ auto it=ram[t].find(k->sec.peer_addr.val[0]);if(it==ram[t].end()){return BLE_HS_ENOENT;}
  *out=it->second;return 0;}
-int ble_store_config_delete(int t,const ble_store_key* k){if(fail_delete)return BLE_HS_ESTORE_FAIL;
- ram[t].erase(k->sec.peer_addr.val[0]);if(disk[t].size()>ram[t].size())disk[t]=ram[t];return 0;}
-int ble_store_config_write(int t,const ble_store_value* v){if(fail_write)return BLE_HS_ESTORE_FAIL;
+int ble_store_config_delete(int t,const ble_store_key* k){if(fail_delete){return BLE_HS_ESTORE_FAIL;}
+ ram[t].erase(k->sec.peer_addr.val[0]);if(disk[t].size()>ram[t].size()){disk[t]=ram[t];}return 0;}
+int ble_store_config_write(int t,const ble_store_value* v){
+ if(fail_write){return BLE_HS_ESTORE_FAIL;}
  ram[t][v->sec.peer_addr.val[0]]=*v;
  // Reproduce the pinned SDK's equal-count update omission.
- if(disk[t].size()<ram[t].size())disk[t]=ram[t];return 0;}
+ if(disk[t].size()<ram[t].size()){disk[t]=ram[t];}
+ return 0;
+}
 void Reset(){ram.clear();disk.clear();journal.clear();staged.clear();
  fail_commit=fail_write=fail_delete=fail_open=false;}
 ble_store_value Key(int id,int byte){ble_store_value v{};v.sec.peer_addr.val[0]=id;v.sec.ltk[0]=byte;return v;}
