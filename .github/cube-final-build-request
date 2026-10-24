@@ -1,4 +1,4 @@
-2026-10-23 Retry dongle build after fixing scheduler-test source extraction.
-Build latest 08c404f6a6b6306f93ba310bd1192fef6f510f22 plus narrowly bounded production-function extraction. Keep deferred split security and native connection parameters unchanged.
-Focused forwarding (3) and security (2) host tests pass; do not skip tests.
-Cube USB+BLE dongle only. No scanner, USB-only, companion or keyboard-half builds. No automatic flashing or bond erasure.
+2026-10-24 User requested one latest dongle firmware build.
+Build 7a364c94eff801aa2892120638adb716497a55eb: isolate incomplete split handshakes, RTC boot-stage trace and read-only wake-word/input diagnostics.
+Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
+No automatic flashing, pairing erasure or release replacement. Boot panic and voice root causes remain under investigation; hardware validation pending.
