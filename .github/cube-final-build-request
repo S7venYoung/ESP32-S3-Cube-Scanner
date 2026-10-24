@@ -1,4 +1,4 @@
-2026-10-24 User requested one latest dongle firmware build.
-Build 7a364c94eff801aa2892120638adb716497a55eb: isolate incomplete split handshakes, RTC boot-stage trace and read-only wake-word/input diagnostics.
+2026-10-24 User requested one dongle firmware build.
+Build 1704c47165897be93425cbcf550c2e52490521a3: existing-key persistence compatibility fix with durable redo journal and power-loss recovery.
 Cube USB+BLE dongle only; no scanner, USB-only, companion or keyboard-half builds.
-No automatic flashing, pairing erasure or release replacement. Boot panic and voice root causes remain under investigation; hardware validation pending.
+No automatic flashing, bond erasure or release replacement. User has not authorized targeted re-pairing; preserve all settings. Hardware validation pending.
