@@ -1,4 +1,4 @@
-2026-10-24 User requested one USB+BLE dongle build.
-Build 7856339d7f4d0fe6d6a0274099cdd633f92dca24: reinstall bond persistence hooks after NimBLE dynamic startup, with regression tests and connection-phase diagnostics.
-Cube USB+BLE dongle only. No scanner, USB-only, keyboard or companion builds.
-No automatic flashing or pairing erasure. Hardware reconnect validation pending.
+2026-10-24 User requested one build after computer BLE fix.
+Build 3e5b6d17ea976370c78870559c314bd486e1dc55: defer computer SMP, accept security-in-progress, and add read-only host diagnostics.
+Cube USB+BLE dongle only; no scanner, USB-only, keyboard halves or companion builds.
+Preserve all pairings and accepted split reconnect behavior. No automatic flashing or release replacement.
