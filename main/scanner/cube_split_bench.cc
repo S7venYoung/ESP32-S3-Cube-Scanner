@@ -25,6 +25,7 @@
 #include <host/ble_hs.h>
 #include <host/ble_sm.h>
 #include <host/ble_store.h>
+#include <store/config/ble_store_config.h>
 #include <host/util/util.h>
 #include <nimble/nimble_port.h>
 #include <nimble/nimble_port_freertos.h>
@@ -41,6 +42,108 @@ extern "C" void ble_store_config_init(void);
 
 namespace {
 constexpr char kTag[] = "CubeSplitBench";
+// IDF 6.1's count-based persistence can omit an update to an existing security
+// record. Replace only that record using the public config-store API. A durable
+// redo journal closes the delete/write power-loss window; never erase all bonds.
+struct PendingBondUpdate {
+    uint32_t magic = 0x43424a31, version = 1, size = sizeof(ble_store_value_sec), type = 0;
+    ble_store_value_sec security{};
+};
+bool SecurityObject(int type) {
+    return type == BLE_STORE_OBJ_TYPE_PEER_SEC || type == BLE_STORE_OBJ_TYPE_OUR_SEC;
+}
+int SaveBondJournal(const PendingBondUpdate* record) {
+    nvs_handle_t handle;
+    if (nvs_open("cube_bond_fix", NVS_READWRITE, &handle) != ESP_OK)
+        return BLE_HS_ESTORE_FAIL;
+    auto rc = record ? nvs_set_blob(handle, "pending_v1", record, sizeof(*record))
+                     : nvs_erase_key(handle, "pending_v1");
+    if (rc == ESP_ERR_NVS_NOT_FOUND)
+        rc = ESP_OK;
+    if (rc == ESP_OK)
+        rc = nvs_commit(handle);
+    nvs_close(handle);
+    return rc == ESP_OK ? 0 : BLE_HS_ESTORE_FAIL;
+}
+int ReplaceBondRecord(int type, const ble_store_value* value) {
+    ble_store_key key{};
+    key.sec.peer_addr = value->sec.peer_addr;
+    key.sec.peer_addr.type &= 1;
+    ble_store_value previous{};
+    int rc = ble_store_config_read(type, &key, &previous);
+    if (rc != 0 && rc != BLE_HS_ENOENT)
+        return rc;
+    if (!rc) {
+        rc = ble_store_config_delete(type, &key);
+        if (rc)
+            return rc;
+    }
+    return ble_store_config_write(type, value);
+}
+int RecoverBondJournal() {
+    nvs_handle_t handle;
+    auto rc = nvs_open("cube_bond_fix", NVS_READONLY, &handle);
+    if (rc == ESP_ERR_NVS_NOT_FOUND)
+        return 0;
+    if (rc != ESP_OK)
+        return BLE_HS_ESTORE_FAIL;
+    PendingBondUpdate pending;
+    size_t size = sizeof(pending);
+    rc = nvs_get_blob(handle, "pending_v1", &pending, &size);
+    nvs_close(handle);
+    if (rc == ESP_ERR_NVS_NOT_FOUND)
+        return 0;
+    if (rc != ESP_OK || size != sizeof(pending) || pending.magic != 0x43424a31 ||
+        pending.version != 1 || pending.size != sizeof(ble_store_value_sec) ||
+        !SecurityObject(pending.type) || pending.security.peer_addr.type > 1)
+        return BLE_HS_ESTORE_FAIL;  // Preserve incompatible data; do not guess or erase.
+    ble_store_value value{};
+    value.sec = pending.security;
+    const int result = ReplaceBondRecord(pending.type, &value);
+    return result ? result : SaveBondJournal(nullptr);
+}
+int PersistBondUpdate(int type, const ble_store_value* value) {
+    if (!SecurityObject(type))
+        return ble_store_config_write(type, value);
+    // The caller may refer to a store entry that replay/replacement will move.
+    ble_store_value replacement{};
+    replacement.sec = value->sec;
+    replacement.sec.peer_addr.type &= 1;
+    value = &replacement;
+    // Complete a previously interrupted update before accepting a new one.
+    int rc = RecoverBondJournal();
+    if (rc)
+        return rc;
+    ble_store_key key{};
+    key.sec.peer_addr = value->sec.peer_addr;
+    key.sec.peer_addr.type &= 1;
+    ble_store_value previous{};
+    rc = ble_store_config_read(type, &key, &previous);
+    if (rc == BLE_HS_ENOENT)
+        return ble_store_config_write(type, value);  // New records already persist correctly.
+    if (rc)
+        return rc;
+    PendingBondUpdate pending;
+    pending.type = type;
+    pending.security = value->sec;
+    pending.security.peer_addr.type &= 1;
+    rc = SaveBondJournal(&pending);
+    if (rc)
+        return rc;  // Never remove the current record without a durable redo copy.
+    rc = ReplaceBondRecord(type, value);
+    // On failure keep the journal and report failure; never claim keys are saved.
+    return rc ? rc : SaveBondJournal(nullptr);
+}
+int DeleteBondWithRecovery(int type, const ble_store_key* key) {
+    // Explicit user deletion must win over a pending redo operation; otherwise
+    // a subsequent reboot could resurrect a record the user just removed.
+    if (SecurityObject(type)) {
+        const int rc = RecoverBondJournal();
+        if (rc)
+            return rc;
+    }
+    return ble_store_config_delete(type, key);
+}
 const ble_uuid128_t kService = BLE_UUID128_INIT(0x2a, 0x48, 0xc2, 0xb1, 0xcf, 0xc5, 0x67, 0xc9,
                                                 0x07, 0x71, 0x96, 0x00, 0x00, 0x00, 0x00, 0x00);
 const ble_uuid128_t kPosition = BLE_UUID128_INIT(0x2a, 0x48, 0xc2, 0xb1, 0xcf, 0xc5, 0x67, 0xc9,
@@ -1283,6 +1386,12 @@ void StartCubeSplitBench() {
     ble_hs_cfg.sync_cb = OnSync;
     ble_hs_cfg.reset_cb = OnReset;
     ble_store_config_init();
+    if (RecoverBondJournal()) {
+        ESP_LOGE(kTag, "Bond journal recovery failed; keys preserved, BLE not started");
+        return;
+    }
+    ble_hs_cfg.store_write_cb = PersistBondUpdate;
+    ble_hs_cfg.store_delete_cb = DeleteBondWithRecovery;
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
     // Never evict a split or another computer bond when the table is full.
     ble_hs_cfg.store_status_cb = [](ble_store_status_event*, void*) { return BLE_HS_ENOMEM; };
