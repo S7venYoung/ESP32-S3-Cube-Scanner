@@ -12,6 +12,7 @@
 #include <nimble/nimble_port.h>
 #include <nvs.h>
 #include <os/os_mbuf.h>
+#include <os/os_mempool.h>
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>
 #include <atomic>
@@ -326,6 +327,7 @@ void AuthorizeAfterPersistence() {
         ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     }
 }
+void SampleRadioPools();
 void Advertise() {
     if (!synced || !configured || connection != BLE_HS_CONN_HANDLE_NONE || transition ||
         (!profiles[selected].bound && esp_timer_get_time() >= pairing_until))
@@ -371,8 +373,35 @@ void Advertise() {
                                reinterpret_cast<void*>(++host_epoch));
     }
     host_diagnostics.adv_rc = rc;
+    SampleRadioPools();
     if (rc)
         last_result = rc;
+}
+void SampleRadioPools() {
+    // Host queue only, at most once a second. Use the public OS diagnostics API,
+    // never private NimBLE globals or key-store data. A bounded walk cannot
+    // stall typing if another component registers many pools.
+    static int64_t next_sample = 0;
+    const int64_t now = esp_timer_get_time();
+    if (now < next_sample)
+        return;
+    next_sample = now + 1000000;
+    cube_dongle::RadioPools pools;
+    os_mempool* cursor = nullptr;
+    os_mempool_info info{};
+    unsigned visited = 0;
+    while (visited < 64) {
+        cursor = os_mempool_info_get_next(cursor, &info);
+        if (!cursor)
+            break;
+        ++visited;
+        pools.Observe(info.omi_name, info.omi_num_free, info.omi_num_blocks);
+    }
+    host_diagnostics.pool_connection = pools.connection.Packed();
+    host_diagnostics.pool_channels = pools.channels.Packed();
+    host_diagnostics.pool_gatt = pools.gatt.Packed();
+    host_diagnostics.pool_scan_complete = cursor == nullptr;
+    host_diagnostics.nimble_limit = MYNEWT_VAL(BLE_MAX_CONNECTIONS);
 }
 void PumpComputerSecurity(int64_t now) {
     if (!security_start_pending || connection == BLE_HS_CONN_HANDLE_NONE || now < security_after ||

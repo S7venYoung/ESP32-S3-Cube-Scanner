@@ -59,3 +59,34 @@ one half, then both halves. Error 6 previously disappeared after changing to
 slot 2 and powering off the right half; two variables changed, so connection
 capacity is not yet proven to be the cause. New resource-stage diagnostics are
 required before increasing pool sizes or altering existing split behavior.
+
+## Actual resource-pool admission check
+
+On the new build the live failure is `ADV-STAGE=3 ADV-RC=6`, with two ready
+halves, no computer CONNECT event, and no active advertisement. The pinned
+`ble_gap_adv_validate()` returns ENOMEM when `ble_hs_conn_can_alloc()` rejects
+connectable advertising. That function checks three separate fixed pools:
+connection >= 1, L2CAP channels >= 3, and GATT client configuration >= 1.
+Free general heap and configured maximum connection count do not establish that
+all three have room. No specific pool has yet been measured on the device.
+
+The SDK's public `os_mempool_info_get_next()` now samples only those three named
+pools on the BLE host queue after an advertising attempt, limited to once per
+second and a maximum of 64 registry entries. CDC only reads atomic snapshots.
+`POOL-CONN`, `POOL-L2CAP`, `POOL-GATT` report free/total blocks, not byte counts.
+`POOL-BLOCKED` bits 1/2/4 identify exhausted connection/L2CAP/GATT pools against
+the SDK's thresholds. `POOL-MISSING` bits report unobserved pools, never assumed
+free or blocked; `POOL-SCAN-COMPLETE=0` indicates a truncated registry walk.
+`NIMBLE-LIMIT` reports `MYNEWT_VAL(BLE_MAX_CONNECTIONS)` rather than the app's
+CONFIG value so configuration/header mismatches are visible.
+
+These values describe the latest sampled advertising attempt, not every later
+controller event. No SDK/vendor file, pool size, scan schedule, identity,
+encryption requirement, bond data or accepted split reconnect path is changed.
+The next device capture must identify the failing pool before selecting the
+configuration or lifetime repair. There is deliberately no guessed capacity
+increase that could mask a leak or affect audio/internal RAM.
+
+Primary source evidence (pinned SDK):
+- [admission check](https://github.com/espressif/esp-nimble/blob/139cada0ae932957fa06ba37d17e3c9c2c95c773/nimble/host/src/ble_hs_conn.c)
+- [public pool diagnostic API](https://github.com/espressif/esp-idf/blob/v6.1/components/bt/porting/include/os/os_mempool.h)

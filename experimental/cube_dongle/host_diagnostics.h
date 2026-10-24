@@ -2,12 +2,16 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include "radio_pools.h"
 
 namespace cube_dongle {
 // Host event queue writes; CDC reads only atomics. No identities or key bytes.
 struct HostDiagnostics {
     std::atomic<uint32_t> flags{0}, connects{0}, disconnects{0}, repeats{0};
     std::atomic<uint32_t> split_links{0}, max_links{0};
+    std::atomic<uint32_t> pool_connection{0xffffffff}, pool_channels{0xffffffff},
+        pool_gatt{0xffffffff}, nimble_limit{0};
+    std::atomic<bool> pool_scan_complete{false};
     std::atomic<int> adv_stage{0}, adv_rc{0}, connect_rc{-1}, security_rc{-1},
         encryption_rc{-1}, disconnect_reason{-1}, auth_reason{0}, keys{0};
     void NewConnection() {
@@ -17,6 +21,9 @@ struct HostDiagnostics {
     }
     std::string Text() const {
         const auto f = flags.load();
+        const RadioPools pools{RadioPoolCount::Unpack(pool_connection.load()),
+                               RadioPoolCount::Unpack(pool_channels.load()),
+                               RadioPoolCount::Unpack(pool_gatt.load())};
         return " HOST-DIAG=2 LINK=" + std::to_string(bool(f & 1)) +
                " ENCRYPTED=" + std::to_string(bool(f & 2)) +
                " BONDED=" + std::to_string(bool(f & 4)) +
@@ -41,7 +48,14 @@ struct HostDiagnostics {
                " KEYS=" + std::to_string(keys.load()) +
                " CONNECTS=" + std::to_string(connects.load()) +
                " DISCONNECTS=" + std::to_string(disconnects.load()) +
-               " REPEATS=" + std::to_string(repeats.load());
+               " REPEATS=" + std::to_string(repeats.load()) +
+               " NIMBLE-LIMIT=" + std::to_string(nimble_limit.load()) +
+               " POOL-CONN=" + pools.connection.Text() +
+               " POOL-L2CAP=" + pools.channels.Text() +
+               " POOL-GATT=" + pools.gatt.Text() +
+               " POOL-BLOCKED=" + std::to_string(pools.Blocked()) +
+               " POOL-MISSING=" + std::to_string(pools.Missing()) +
+               " POOL-SCAN-COMPLETE=" + std::to_string(pool_scan_complete.load());
     }
 };
 }  // namespace cube_dongle
