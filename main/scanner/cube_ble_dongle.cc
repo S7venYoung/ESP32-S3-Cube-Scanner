@@ -28,6 +28,7 @@
 #include "../../experimental/cube_dongle/host_control.h"
 #include "../../experimental/cube_dongle/host_cycle.h"
 #include "../../experimental/cube_dongle/host_diagnostics.h"
+#include "../../experimental/cube_dongle/host_epoch.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
@@ -68,7 +69,7 @@ bool security_pending = false;
 bool security_start_pending = false;
 int64_t security_after = 0;
 cube_dongle::HostDiagnostics host_diagnostics;
-uintptr_t host_epoch = 1;
+cube_dongle::HostEpoch host_epoch;
 int64_t advertisement_next = 0, transition_started = 0;
 std::atomic<uint32_t> ui_notice{0};
 uint32_t notice_sequence = 0;
@@ -330,6 +331,7 @@ void AuthorizeAfterPersistence() {
 void SampleRadioPools();
 void Advertise() {
     if (!synced || !configured || connection != BLE_HS_CONN_HANDLE_NONE || transition ||
+        host_epoch.Pending() ||
         (!profiles[selected].bound && esp_timer_get_time() >= pairing_until))
         return;
     if (ble_gap_adv_active())
@@ -369,8 +371,10 @@ void Advertise() {
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
     if (!rc) {
         host_diagnostics.adv_stage = 3;
+        const auto epoch = host_epoch.Begin();
         rc = ble_gap_adv_start(own_type, nullptr, BLE_HS_FOREVER, &params, Gap,
-                               reinterpret_cast<void*>(++host_epoch));
+                               reinterpret_cast<void*>(epoch));
+        host_epoch.Complete(rc);
     }
     host_diagnostics.adv_rc = rc;
     SampleRadioPools();
@@ -467,7 +471,7 @@ void Pump() {
     }
 }
 int Gap(ble_gap_event* event, void* arg) {
-    if (reinterpret_cast<uintptr_t>(arg) != host_epoch)
+    if (!host_epoch.Accept(reinterpret_cast<uintptr_t>(arg)))
         return 0;
     if (event->type == BLE_GAP_EVENT_CONNECT) {
         host_diagnostics.connect_rc = event->connect.status;
@@ -995,7 +999,7 @@ void CubeBleHostReset() {
     studio_subscribed = false;
     StudioReset();
 #endif
-    ++host_epoch;
+    host_epoch.Invalidate();
     security_pending = false;
     security_start_pending = false;
     synced = false;

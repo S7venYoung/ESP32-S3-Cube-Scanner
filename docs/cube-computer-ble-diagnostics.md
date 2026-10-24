@@ -90,3 +90,36 @@ increase that could mask a leak or affect audio/internal RAM.
 Primary source evidence (pinned SDK):
 - [admission check](https://github.com/espressif/esp-nimble/blob/139cada0ae932957fa06ba37d17e3c9c2c95c773/nimble/host/src/ble_hs_conn.c)
 - [public pool diagnostic API](https://github.com/espressif/esp-idf/blob/v6.1/components/bt/porting/include/os/os_mempool.h)
+
+## Delayed CONNECT callback invalidated by an unsuccessful advertising retry
+
+The device capture on slot 4 showed all pools exhausted (0/3 connection, 0/9
+L2CAP, 0/4 GATT including the GATT cache), two ready halves, but LINK=0 and
+CONNECTS=0 in the app. This is evidence of an allocated connection the computer
+state machine has not adopted, not justification to add more connection slots.
+Pool snapshots and ADV-RC are from neighboring host events and may differ.
+
+The pinned `ble_gap_rx_conn_complete()` allocates/inserts a new peripheral
+connection, clears advertising state, and starts remote version/feature exchange.
+It only delivers the application's CONNECT from the later
+`ble_gap_event_connect_call()`. During that window the host timer sees no active
+advertisement and the app still has no computer handle, so it can retry
+advertising. The original expression passed `++host_epoch` directly to
+`ble_gap_adv_start()`, even if that call failed with ENOMEM. This invalidates the
+callback cookie held by the SDK's already allocated connection. The delayed
+CONNECT and later DISCONNECT are silently rejected by the app's epoch guard.
+
+`HostEpoch` now keeps an active cookie plus a provisional advertising cookie.
+The active cookie is replaced only when advertising actually starts. Failed
+attempts cannot invalidate it. While the API is running, either active or
+provisional callbacks are accepted (callbacks need not be assumed asynchronous).
+Recursive starts are blocked. A host reset invalidates both without reusing
+sequence values. Later successful sessions still reject stale cookies.
+
+`DONGLE HOST` now includes `HOST-EPOCH=2`. Regression tests reproduce the old
+comparison failure and cover 100 failed retries, delayed CONNECT acceptance,
+callbacks during an advertising call, success invalidating the old session,
+reentrant starts and reset cancellation. No pool sizes, bonding, security gates,
+split connection logic or existing Release are changed. Hardware acceptance is
+still needed with both halves and the Mac: pairing, HID typing, host cycling,
+Cube power cycling, and confirming no untracked third connection remains.

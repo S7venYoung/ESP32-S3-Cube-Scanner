@@ -49,7 +49,7 @@ struct HostDiagnostics {
                " CONNECTS=" + std::to_string(connects.load()) +
                " DISCONNECTS=" + std::to_string(disconnects.load()) +
                " REPEATS=" + std::to_string(repeats.load()) +
-               " NIMBLE-LIMIT=" + std::to_string(nimble_limit.load()) +
+               " HOST-EPOCH=2 NIMBLE-LIMIT=" + std::to_string(nimble_limit.load()) +
                " POOL-CONN=" + pools.connection.Text() +
                " POOL-L2CAP=" + pools.channels.Text() +
                " POOL-GATT=" + pools.gatt.Text() +
