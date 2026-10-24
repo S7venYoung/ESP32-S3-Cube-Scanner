@@ -20,6 +20,7 @@ jobs:
       SOURCE_RUN: '40064188721'
       SOURCE_SHA: 51182eaf2343c3e1beee0186c6840121f004068e
       RELEASE_TAG: cube-dongle-2026.10.24
+      RELEASE_SHA: ${{ github.sha }}
     steps:
       - name: Verify and download the hardware-accepted build without compiling
         run: |
@@ -82,15 +83,16 @@ jobs:
           - 已刷入并验证本次 Action 固件的用户无需重复刷写。本发布复用原始二进制，**没有重新编译，也没有改变固件内容**。
 
           来源分支：`codex/xingzhi-cube-dongle`；源码：`51182eaf2343c3e1beee0186c6840121f004068e`。
+          发布标签指向仅更新发布流程的提交；二进制仍严格来自上述源码和构建，没有加入后续固件改动。
           成功构建：https://github.com/S7venYoung/ESP32-S3-Cube-Scanner/actions/runs/40064188721
           NOTES
-          gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" \
+          gh release create "$RELEASE_TAG" release/* --target "$RELEASE_SHA" \
             --title "Cube Velvet Pro USB + BLE Dongle · 2026.10.24" --draft --notes-file notes.md
           gh release view "$RELEASE_TAG" --json assets > published-assets.json
           jq -e '.assets | length == 5 and all(.[]; .state == "uploaded" and .size > 0)' published-assets.json
           gh release edit "$RELEASE_TAG" --draft=false --latest
           gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > published.json
-          jq -e --arg sha "$SOURCE_SHA" '.draft == false and .prerelease == false and .target_commitish == $sha and (.assets | length == 5)' published.json
+          jq -e --arg sha "$RELEASE_SHA" '.draft == false and .prerelease == false and .target_commitish == $sha and (.assets | length == 5)' published.json
       - name: Remove only the two approved old releases after publishing succeeds
         run: |
           set -euo pipefail
