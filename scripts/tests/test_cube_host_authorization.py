@@ -16,6 +16,8 @@ class HostAuthorizationTests(unittest.TestCase):
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include "host_diagnostics.h"
+cube_dongle::HostDiagnostics host_diagnostics;
 #define BLE_ADDR_RANDOM 1
 #define BLE_ERR_REM_USER_CONN_TERM 19
 #define ESP_LOGI(...) ((void)0)
@@ -49,16 +51,21 @@ int main(){
  Reset();desc.peer_id_addr.type=1;desc.peer_id_addr.val[5]=0x40;
  assert(UnresolvedPrivate(desc.peer_id_addr));AuthorizeAfterPersistence();
  assert(security_pending&&!authorized&&!terminated&&!saves);
+ assert(host_diagnostics.auth_reason==2);
  desc.peer_id_addr.type=0;desc.peer_id_addr.val[5]=0;
  keys_ready=false;AuthorizeAfterPersistence();assert(security_pending&&!terminated&&!saves);
+ assert(host_diagnostics.auth_reason==3&&host_diagnostics.keys==0);
  keys_ready=true;AuthorizeAfterPersistence();assert(authorized&&!security_pending&&saves==1);
+ assert(host_diagnostics.auth_reason==0&&host_diagnostics.keys==3);
  assert(profiles[0].bound);
  Reset();profiles[0].bound=true;profiles[0].identity=desc.peer_id_addr;
  AuthorizeAfterPersistence();assert(authorized&&saves==0);
  Reset();profiles[0].bound=true;profiles[0].identity.val[0]=8;
  AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&saves==0);
+ assert(host_diagnostics.auth_reason==5);
  Reset();profiles[1].bound=true;profiles[1].identity=desc.peer_id_addr;
  AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&saves==0);
+ assert(host_diagnostics.auth_reason==4);
  Reset();key_size=12;AuthorizeAfterPersistence();assert(!authorized&&security_pending&&!terminated);
  now=security_deadline;AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&!saves);
  Reset();pairing_until=0;AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&!saves);
@@ -72,6 +79,7 @@ int main(){
             path.write_text(program)
             binary = str(Path(tmp) / 'test')
             subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                            '-I', str(ROOT / 'experimental/cube_dongle'),
                             '-fsanitize=address,undefined', str(path), '-o', binary], check=True)
             subprocess.run([binary], check=True)
 

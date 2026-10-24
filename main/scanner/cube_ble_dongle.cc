@@ -26,6 +26,7 @@
 #endif
 #include "../../experimental/cube_dongle/host_control.h"
 #include "../../experimental/cube_dongle/host_cycle.h"
+#include "../../experimental/cube_dongle/host_diagnostics.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
@@ -63,6 +64,9 @@ int64_t system_started = 0;
 bool authorized = false, suspended = false, keyboard_sub = false, media_sub = false,
      boot_sub = false, pointer_sub = false;
 bool security_pending = false;
+bool security_start_pending = false;
+int64_t security_after = 0;
+cube_dongle::HostDiagnostics host_diagnostics;
 uintptr_t host_epoch = 1;
 int64_t advertisement_next = 0, transition_started = 0;
 std::atomic<uint32_t> ui_notice{0};
@@ -178,6 +182,21 @@ int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
 }
 #endif
 void Publish() {
+    ble_gap_conn_desc diagnostic_connection{};
+    const bool link = connection != BLE_HS_CONN_HANDLE_NONE &&
+                      !ble_gap_conn_find(connection, &diagnostic_connection);
+    host_diagnostics.flags =
+        (link ? 1u : 0u) | (link && diagnostic_connection.sec_state.encrypted ? 2u : 0u) |
+        (link && diagnostic_connection.sec_state.bonded ? 4u : 0u) |
+        (authorized ? 8u : 0u) | ((security_pending || security_start_pending) ? 16u : 0u) |
+        (keyboard_sub ? 32u : 0u) | (boot_sub ? 64u : 0u) |
+        (ble_gap_adv_active() ? 128u : 0u) |
+        (esp_timer_get_time() < pairing_until ? 256u : 0u) |
+        (profiles[selected].bound ? 512u : 0u) | (protocol ? 1024u : 0u) |
+        (suspended ? 2048u : 0u);
+    const auto split_status = CubeSplitBenchStatus();
+    host_diagnostics.split_links = bool(split_status & 4) + bool(split_status & 8);
+    host_diagnostics.max_links = CONFIG_BT_NIMBLE_MAX_CONNECTIONS;
     uint8_t mask = 0;
     for (unsigned i = 0; i < 5; ++i)
         if (profiles[i].bound)
@@ -246,8 +265,10 @@ bool UnresolvedPrivate(const ble_addr_t& address) {
 }
 void AuthorizeAfterPersistence() {
     ble_gap_conn_desc desc{};
-    if (ble_gap_conn_find(connection, &desc) || !desc.sec_state.encrypted)
+    if (ble_gap_conn_find(connection, &desc) || !desc.sec_state.encrypted) {
+        host_diagnostics.auth_reason = 1;  // Waiting for encryption.
         return;  // The existing security deadline bounds every pending attempt.
+    }
     bool valid = desc.sec_state.bonded && ValidIdentity(desc.peer_id_addr) &&
                  !UnresolvedPrivate(desc.peer_id_addr) &&
                  !CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1);
@@ -257,29 +278,41 @@ void AuthorizeAfterPersistence() {
     key.peer_addr.type &= 1;
     // ENC_CHANGE precedes identity update and key persistence on fresh pairing.
     // Authorize only from a subsequent host event after both SC keys are stored.
-    const bool persisted = valid && !ble_store_read_our_sec(&key, &our) && !ble_store_read_peer_sec(&key, &peer) &&
-            our.ltk_present && peer.ltk_present && our.sc && peer.sc && our.key_size == 16 &&
-            peer.key_size == 16;
+    const bool our_key = valid && !ble_store_read_our_sec(&key, &our) &&
+                         our.ltk_present && our.sc && our.key_size == 16;
+    const bool peer_key = valid && !ble_store_read_peer_sec(&key, &peer) &&
+                          peer.ltk_present && peer.sc && peer.key_size == 16;
+    host_diagnostics.keys = (our_key ? 1 : 0) | (peer_key ? 2 : 0);
+    const bool persisted = our_key && peer_key;
+    host_diagnostics.auth_reason = valid ? 3 : 2;  // Keys or identity not ready.
     if (!persisted && esp_timer_get_time() < security_deadline)
         return;  // Retry on the host timer; never grant GATT/HID access early.
     security_pending = false;
     valid = persisted;
     for (unsigned i = 0; i < 5; ++i)
-        if (i != selected && profiles[i].bound && Same(profiles[i].identity, desc.peer_id_addr))
+        if (i != selected && profiles[i].bound && Same(profiles[i].identity, desc.peer_id_addr)) {
+            host_diagnostics.auth_reason = 4;  // Computer belongs to another slot.
             valid = false;
-    if (valid && profiles[selected].bound)
+        }
+    if (valid && profiles[selected].bound) {
         valid = Same(profiles[selected].identity, desc.peer_id_addr);
-    else if (valid) {
+        if (!valid)
+            host_diagnostics.auth_reason = 5;  // Selected slot is a different computer.
+    } else if (valid) {
         valid = esp_timer_get_time() < pairing_until && SaveProfile(selected, &desc.peer_id_addr);
         if (valid) {
             profiles[selected].bound = true;
             profiles[selected].identity = desc.peer_id_addr;
             profiles[selected].identity.type &= 1;
             pairing_until = 0;
-        } else
+        } else {
+            host_diagnostics.auth_reason = esp_timer_get_time() >= pairing_until ? 6 : 7;
             last_result = -1;
+        }
     }
     authorized = valid;
+    if (valid)
+        host_diagnostics.auth_reason = 0;
     ESP_LOGI(kTag, "BLE profile=%u authorization=%d persisted=%d", selected + 1, valid, persisted);
     ReleaseBle();
     if (routed_ble)
@@ -318,22 +351,55 @@ void Advertise() {
     fields.uuids128_is_complete = 1;
 #endif
     int rc = ble_gap_adv_set_fields(&fields);
+    host_diagnostics.adv_stage = 1;
     const char name[] = "Cube Velvet Pro";
     ble_svc_gap_device_name_set(name);
     ble_hs_adv_fields response{};
     response.name = reinterpret_cast<const uint8_t*>(name);
     response.name_len = std::strlen(name);
     response.name_is_complete = 1;
-    if (!rc)
+    if (!rc) {
+        host_diagnostics.adv_stage = 2;
         rc = ble_gap_adv_rsp_set_fields(&response);
+    }
     ble_gap_adv_params params{};
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    if (!rc)
+    if (!rc) {
+        host_diagnostics.adv_stage = 3;
         rc = ble_gap_adv_start(own_type, nullptr, BLE_HS_FOREVER, &params, Gap,
                                reinterpret_cast<void*>(++host_epoch));
+    }
+    host_diagnostics.adv_rc = rc;
     if (rc)
         last_result = rc;
+}
+void PumpComputerSecurity(int64_t now) {
+    if (!security_start_pending || connection == BLE_HS_CONN_HANDLE_NONE || now < security_after ||
+        now >= security_deadline)
+        return;
+    ble_gap_conn_desc desc{};
+    if (ble_gap_conn_find(connection, &desc)) {
+        security_start_pending = false;
+        host_diagnostics.security_rc = BLE_HS_ENOTCONN;
+        return;
+    }
+    if (desc.sec_state.encrypted) {
+        security_start_pending = false;
+        security_pending = true;
+        return;
+    }
+    const int rc = ble_gap_security_initiate(connection);
+    host_diagnostics.security_rc = rc;
+    if (!rc || rc == BLE_HS_EALREADY) {
+        security_start_pending = false;  // Another SMP exchange is not a failure.
+    } else if (rc == BLE_HS_EBUSY || rc == BLE_HS_EAGAIN) {
+        security_after = now + 100000;  // Still bounded by security_deadline.
+    } else {
+        security_start_pending = false;
+        last_result = rc;
+        ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+    }
 }
 void Pump() {
     if (!NotifyReady() || inflight)
@@ -375,45 +441,60 @@ int Gap(ble_gap_event* event, void* arg) {
     if (reinterpret_cast<uintptr_t>(arg) != host_epoch)
         return 0;
     if (event->type == BLE_GAP_EVENT_CONNECT) {
+        host_diagnostics.connect_rc = event->connect.status;
         if (event->connect.status) {
             Advertise();
             return 0;
         }
         connection = event->connect.conn_handle;
+        host_diagnostics.NewConnection();
 #if CONFIG_CUBE_STUDIO_RPC
         studio_subscribed = false;
         StudioReset();
 #endif
         authorized = false;
         security_pending = false;
+        security_start_pending = false;
         protocol = 1;
         suspended = false;
         keyboard_sub = media_sub = boot_sub = pointer_sub = false;
         ReleaseBle();
         ble_gap_conn_desc desc{};
-        if (ble_gap_conn_find(connection, &desc) ||
-            CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1) ||
-            (profiles[selected].bound && !Same(profiles[selected].identity, desc.peer_id_addr) &&
-             !UnresolvedPrivate(desc.peer_id_addr)) ||
-            (!profiles[selected].bound && esp_timer_get_time() >= pairing_until)) {
+        int rejected = 0;
+        if (ble_gap_conn_find(connection, &desc))
+            rejected = 8;  // Connection descriptor unavailable.
+        else if (CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1))
+            rejected = 9;  // A split identity must not occupy a computer slot.
+        else if (profiles[selected].bound &&
+                 !Same(profiles[selected].identity, desc.peer_id_addr) &&
+                 !UnresolvedPrivate(desc.peer_id_addr))
+            rejected = 5;
+        else if (!profiles[selected].bound && esp_timer_get_time() >= pairing_until)
+            rejected = 6;
+        if (rejected) {
+            host_diagnostics.auth_reason = rejected;
+            last_result = -5;
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             return 0;
         }
         ESP_LOGI(kTag, "BLE profile=%u connected; securing", selected + 1);
         security_deadline = esp_timer_get_time() + 30000000;
-        if (ble_gap_security_initiate(connection))
-            ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+        security_after = esp_timer_get_time() + 100000;
+        security_start_pending = true;
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                connection == event->disconnect.conn.conn_handle) {
         ESP_LOGI(kTag, "BLE profile=%u disconnected reason=%d", selected + 1,
                  event->disconnect.reason);
         connection = BLE_HS_CONN_HANDLE_NONE;
+        ++host_diagnostics.disconnects;
+        host_diagnostics.disconnect_reason = event->disconnect.reason;
 #if CONFIG_CUBE_STUDIO_RPC
         studio_subscribed = false;
         StudioReset();
 #endif
         authorized = false;
         security_pending = false;
+        security_start_pending = false;
         keyboard_sub = media_sub = boot_sub = pointer_sub = false;
         inflight = false;
         phase = 0;
@@ -426,6 +507,8 @@ int Gap(ble_gap_event* event, void* arg) {
         ESP_LOGI(kTag, "BLE profile=%u encryption status=%d", selected + 1,
                  event->enc_change.status);
         authorized = false;
+        security_start_pending = false;
+        host_diagnostics.encryption_rc = event->enc_change.status;
         security_pending = !event->enc_change.status;
         ReleaseBle();
         if (routed_ble)
@@ -485,6 +568,7 @@ int Gap(ble_gap_event* event, void* arg) {
             phase = 0;
         }
     } else if (event->type == BLE_GAP_EVENT_REPEAT_PAIRING) {
+        ++host_diagnostics.repeats;
         return BLE_GAP_REPEAT_PAIRING_IGNORE;  // clear the selected computer slot explicitly
     }
     Publish();
@@ -884,6 +968,7 @@ void CubeBleHostReset() {
 #endif
     ++host_epoch;
     security_pending = false;
+    security_start_pending = false;
     synced = false;
     if (timer_initialized)
         ble_npl_callout_stop(&output_timer);
@@ -898,6 +983,7 @@ void CubeBleHostReset() {
 void CubeDualTick() {
     if (!synced || !configured)
         return;
+    PumpComputerSecurity(esp_timer_get_time());
     if (security_pending && connection != BLE_HS_CONN_HANDLE_NONE)
         AuthorizeAfterPersistence();
 #if CONFIG_CUBE_STUDIO_RPC
@@ -1181,5 +1267,5 @@ std::string CubeDualStatus() {
            " SWITCHING=" + (((status & (1u << 24)) || mailbox.load()) ? "1" : "0") +
            " RESULT=" + std::to_string(last_result.load()) +
            " DONE=" + std::to_string(done_ticket.load()) +
-           " COMMAND-RESULT=" + std::to_string(command_result.load());
+           " COMMAND-RESULT=" + std::to_string(command_result.load()) + host_diagnostics.Text();
 }
