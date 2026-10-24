@@ -1,3 +1,4 @@
-2026-10-21 User requested dongle GitHub Release.
-Publish existing successful dual build 39571889475, source b6406c5b.
-Do not rebuild firmware. Mark prerelease with watchdog stability warning.
+2026-10-24 User accepted USB+BLE dongle build 40064188721 on hardware.
+Publish existing artifact from 51182eaf2343c3e1beee0186c6840121f004068e, without rebuilding.
+After verified publication, remove historical releases 419344967 and 419351686 only.
+Keep all tags and commits; preserve old metadata/assets as a 90-day Actions artifact first.

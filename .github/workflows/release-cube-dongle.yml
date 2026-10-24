@@ -7,6 +7,9 @@ on:
 permissions:
   contents: write
   actions: read
+concurrency:
+  group: cube-dongle-release
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -14,36 +17,89 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: '40064188721'
+      SOURCE_SHA: 51182eaf2343c3e1beee0186c6840121f004068e
+      RELEASE_TAG: cube-dongle-2026.10.24
     steps:
-      - name: Verify source run and download existing artifact
+      - name: Verify and download the hardware-accepted build without compiling
         run: |
           set -euo pipefail
-          gh api "repos/$GH_REPO/actions/runs/39571889475" > run.json
-          jq -e '.conclusion == "success" and .head_sha == "b6406c5b5fdd73f7599bd3c35f1429dc370d173b" and .head_branch == "codex/xingzhi-cube-dongle"' run.json
-          gh run download 39571889475 --name Cube-Dual-Dongle --dir firmware
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > run.json
+          jq -e --arg sha "$SOURCE_SHA" '.status == "completed" and .conclusion == "success" and .head_sha == $sha and .head_branch == "codex/xingzhi-cube-dongle"' run.json
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/artifacts" > artifacts.json
+          jq -e '[.artifacts[] | select(.id == 12549185769 and .name == "Cube-Dual-Dongle" and .expired == false)] | length == 1' artifacts.json
+          gh run download "$SOURCE_RUN" --name Cube-Dual-Dongle --dir firmware
           test -f firmware/merged-binary.bin
           test -f firmware/xingzhi_cube_dual_candidate.bin
+          test -f firmware/xiaozhi.bin
+          cmp firmware/xiaozhi.bin firmware/xingzhi_cube_dual_candidate.bin
           (cd firmware && sha256sum -c SHA256SUMS)
-      - name: Package and publish prerelease without rebuilding
+      - name: Preserve the two exact historical releases before removal
+        run: |
+          set -euo pipefail
+          mkdir -p historical-release-backup
+          for item in '419344967:cube-dongle-2026.10.21' '419351686:cube-scanner-2026.10.21'; do
+            id=${item%%:*}
+            tag=${item#*:}
+            mkdir -p "historical-release-backup/$tag"
+            gh api "repos/$GH_REPO/releases/$id" > "historical-release-backup/$tag/metadata.json"
+            jq -e --arg tag "$tag" --argjson id "$id" '.id == $id and .tag_name == $tag' "historical-release-backup/$tag/metadata.json"
+            gh release download "$tag" --dir "historical-release-backup/$tag"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Historical-releases-before-2026.10.24
+          path: historical-release-backup/
+          retention-days: 90
+          if-no-files-found: error
+      - name: Package unchanged firmware and publish stable release
         run: |
           set -euo pipefail
           mkdir release
-          (cd firmware && zip -qr ../release/Cube-Velvet-Pro-Dongle-2026.10.21.zip .)
-          cp firmware/merged-binary.bin release/
-          cp firmware/xingzhi_cube_dual_candidate.bin release/
+          (cd firmware && zip -qr ../release/Cube-Velvet-Pro-Dongle-2026.10.24.zip .)
+          cp firmware/merged-binary.bin firmware/xiaozhi.bin firmware/xingzhi_cube_dual_candidate.bin release/
           (cd release && sha256sum *.bin *.zip > SHA256SUMS)
           cat > notes.md <<'NOTES'
-          星智 Cube 1.54 TFT Wi-Fi：USB + BLE 双模 dongle 预发布。
+          星智 Cube 1.54 TFT Wi-Fi：Cube Velvet Pro USB + BLE 双模 dongle。
 
-          保留小智、主题与 Codex 同步。包含 DYA 系统行为（Bootloader、Studio Unlock、System Reset）、USB Output 绑定、USB → BLE 1～5 → USB 循环、紧凑黄色提示条、复位原因编码及正 tick 调度修复。
+          ## 本次修复
 
-          **已知问题：用户仍报告反复看门狗重启，尚未确认根因和稳定性。编译通过不等于实机稳定；不建议替换唯一可用键盘。**
+          - 修复 ESP-IDF 6.1 / NimBLE 动态启动再次初始化存储、覆盖配对保存回调的问题。启动同步后、广播及扫描前重新安装；主机复位后同样处理。
+          - 保留已有配对和单条密钥更新掉电恢复机制，不自动清除键盘、电脑、Wi-Fi 或小智配置。
+          - 增加连接建立失败/连接后断开的阶段诊断；`DONGLE SPLIT DIAG` 可见 `store_sync=2 store_hooks=1`。
 
-          ZIP 是完整固件包。`merged-binary.bin` 为完整镜像；`xingzhi_cube_dual_candidate.bin` 仅为应用镜像，不能作为完整镜像从 0x0 刷入。请按包内分区说明刷写；不要默认全片擦除或清除绑定。键盘左右手 UF2 不包含在本发布内。
+          保留小智、现有主题、Codex 同步、DYA 和 USB/BLE 输出功能。电脑蓝牙名称为 **Cube Velvet Pro**。
 
-          本发布复用成功构建 https://github.com/S7venYoung/ESP32-S3-Cube-Scanner/actions/runs/39571889475 ，源码固定为 b6406c5b5fdd73f7599bd3c35f1429dc370d173b，未再次编译。
+          ## 实机验证范围
+
+          用户已确认本版可用，并多次重启 Cube 验证左右手自动回连。最近一次读取日志：左右手均 `phase=8`，各尝试一次，无连接错误；约开机后 3 秒/5 秒恢复。此验证不等于所有硬件、长时间运行或所有 DYA/语音场景已覆盖。
+
+          ## 下载及更新
+
+          - 已安装兼容 dongle 固件、只更新应用：`xiaozhi.bin`（与 `xingzhi_cube_dual_candidate.bin` 完全相同）。选择刷机工具的**仅更新应用**模式，按现有分区配置更新，不要从 0x0 刷应用镜像。
+          - 首次安装/需要完整固件：下载 ZIP，按包内说明使用 `merged-binary.bin` 完整镜像。不要默认全片擦除或清除配对；完整镜像与应用镜像不可混用。
+          - ZIP 保留资源、分区、引导程序及构建校验文件；发布附件另有 `SHA256SUMS`。不包含左右手键盘 UF2 或 macOS 配套程序。
+          - 已刷入并验证本次 Action 固件的用户无需重复刷写。本发布复用原始二进制，**没有重新编译，也没有改变固件内容**。
+
+          来源分支：`codex/xingzhi-cube-dongle`；源码：`51182eaf2343c3e1beee0186c6840121f004068e`。
+          成功构建：https://github.com/S7venYoung/ESP32-S3-Cube-Scanner/actions/runs/40064188721
           NOTES
-          gh release create cube-dongle-2026.10.21 release/* \
-            --target b6406c5b5fdd73f7599bd3c35f1429dc370d173b \
-            --title "Cube Velvet Pro USB + BLE Dongle · 2026.10.21" \
-            --prerelease --notes-file notes.md
+          gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" \
+            --title "Cube Velvet Pro USB + BLE Dongle · 2026.10.24" --draft --notes-file notes.md
+          gh release view "$RELEASE_TAG" --json assets > published-assets.json
+          jq -e '.assets | length == 5 and all(.[]; .state == "uploaded" and .size > 0)' published-assets.json
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+          gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > published.json
+          jq -e --arg sha "$SOURCE_SHA" '.draft == false and .prerelease == false and .target_commitish == $sha and (.assets | length == 5)' published.json
+      - name: Remove only the two approved old releases after publishing succeeds
+        run: |
+          set -euo pipefail
+          for item in '419344967:cube-dongle-2026.10.21' '419351686:cube-scanner-2026.10.21'; do
+            id=${item%%:*}
+            tag=${item#*:}
+            test "$tag" != "$RELEASE_TAG"
+            gh api "repos/$GH_REPO/releases/$id" > old.json
+            jq -e --arg tag "$tag" --argjson id "$id" '.id == $id and .tag_name == $tag' old.json
+            gh api --method DELETE "repos/$GH_REPO/releases/$id"
+          done
+          gh release list --limit 20
