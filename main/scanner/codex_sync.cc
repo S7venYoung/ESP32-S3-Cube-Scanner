@@ -9,6 +9,8 @@
 #endif
 #endif
 #if CONFIG_CUBE_SPLIT_BENCH
+#include "cube_boot_trace.h"
+#include "application.h"
 #include "../../experimental/cube_dongle/keyboard_dashboard.h"
 #include "cube_split_bench.h"
 #endif
@@ -198,6 +200,17 @@ void SyncTask(void*) {
 #if CONFIG_CUBE_SPLIT_BENCH
                     else if (line == "DONGLE SPLIT DIAG")
                         Reply(CubeSplitDiagnostics());
+                    else if (line == "DONGLE BOOT DIAG")
+                        Reply(CubeBootTraceStatus());
+                    else if (line == "DONGLE AUDIO DIAG") {
+                        auto& app = Application::GetInstance();
+                        auto& audio = app.GetAudioService();
+                        Reply("CUBE-AUDIO/1 state=" + std::to_string(unsigned(app.GetDeviceState())) +
+                              " wake_running=" + std::to_string(audio.IsWakeWordRunning()) +
+                              " wake_status=" + std::to_string(audio.WakeDiagnosticStatus()) +
+                              " input_frames=" + std::to_string(audio.InputDiagnosticFrames()) +
+                              " input_errors=" + std::to_string(audio.InputDiagnosticErrors()));
+                    }
 #if CONFIG_CUBE_BLE_DONGLE_OUTPUT
                     else if (line == "DONGLE")
                         Reply("CUBE-DUAL-CANDIDATE/1 " + std::to_string(CubeSplitBenchStatus()) +

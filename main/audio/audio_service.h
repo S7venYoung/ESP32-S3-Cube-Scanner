@@ -132,6 +132,11 @@ public:
         return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING;
     }
     bool IsAfeWakeWord();
+#if CONFIG_CUBE_SPLIT_BENCH
+    int WakeDiagnosticStatus() const { return wake_diagnostic_status_.load(); }
+    uint32_t InputDiagnosticFrames() const { return input_diagnostic_frames_.load(); }
+    uint32_t InputDiagnosticErrors() const { return input_diagnostic_errors_.load(); }
+#endif
 
     void EnableWakeWordDetection(bool enable);
     void ReleaseWakeWordResources();
@@ -198,6 +203,10 @@ private:
     FixedQueue<uint32_t, MAX_TIMESTAMPS_IN_QUEUE> timestamp_queue_;
 
     bool audio_engine_initialized_ = false;
+#if CONFIG_CUBE_SPLIT_BENCH
+    std::atomic<int> wake_diagnostic_status_{0};
+    std::atomic<uint32_t> input_diagnostic_frames_{0}, input_diagnostic_errors_{0};
+#endif
     bool voice_detected_ = false;
 #if CONFIG_USE_DEVICE_AEC
     bool device_aec_enabled_ = true;

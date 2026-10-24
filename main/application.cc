@@ -1,4 +1,7 @@
 #include "application.h"
+#if CONFIG_CUBE_SPLIT_BENCH
+#include "scanner/cube_boot_trace.h"
+#endif
 #include "assets.h"
 #include "assets/lang_config.h"
 #include "audio_codec.h"
@@ -166,7 +169,13 @@ void Application::Initialize() {
     });
 
     // Start network asynchronously
+#if CONFIG_CUBE_SPLIT_BENCH
+    CubeBootTraceStage(3);  // Start USB sync, split BLE and Wi-Fi.
+#endif
     board.StartNetwork();
+#if CONFIG_CUBE_SPLIT_BENCH
+    CubeBootTraceStage(4);  // Network startup returned.
+#endif
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
@@ -362,17 +371,26 @@ void Application::HandleActivationDoneEvent() {
 }
 
 void Application::ActivationTask() {
+#if CONFIG_CUBE_SPLIT_BENCH
+    CubeBootTraceStage(6);  // XiaoZhi activation/protocol configuration.
+#endif
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
     // Check for new assets version
     CheckAssetsVersion();
+#if CONFIG_CUBE_SPLIT_BENCH
+    CubeBootTraceStage(7);
+#endif
 
     // Check for new firmware version
     CheckNewVersion();
 
     // Initialize the protocol
     InitializeProtocol();
+#if CONFIG_CUBE_SPLIT_BENCH
+    CubeBootTraceStage(8);  // Protocol initialized, activation completion queued.
+#endif
 
     // Signal completion to main loop
     xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);

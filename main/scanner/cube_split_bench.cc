@@ -90,6 +90,14 @@ struct Peer {
     bool battery_pending = false;
 };
 Peer peers[2];
+// ESP32 adaptation: keep new initiation/scanning out of an incomplete split
+// handshake. Ready halves keep sending input; this is not a host-HID lock.
+bool HandshakePending() {
+    for (const auto& peer : peers)
+        if (peer.phase >= Phase::Connecting && peer.phase <= Phase::Reading)
+            return true;
+    return false;
+}
 cube_dongle::SplitDiagnostics split_diagnostics[2];
 std::atomic<uint8_t> relay_ready{0};
 std::array<std::atomic<uintptr_t>, 2> relay_generations{};
@@ -866,6 +874,8 @@ void Connect(Peer& peer) {
     }
 }
 bool ConnectCandidate() {
+    if (HandshakePending())
+        return false;
     for (size_t side = 0; side < 2; ++side) {
         auto& peer = peers[side];
         const auto& candidate = candidates[side];
@@ -894,7 +904,7 @@ int OnGap(ble_gap_event* event, void* arg) {
                 !std::memcmp(peers[side].address.val, event->disc.addr.val, 6))
                 split_diagnostics[side].Advertisement(esp_timer_get_time() / 1000);
         // Known bonded halves use directed advertisements without service data.
-        if (connecting || event->disc.event_type > 1)
+        if (connecting || HandshakePending() || event->disc.event_type > 1)
             return 0;
         for (size_t side = 0; side < 2; ++side) {
             auto& peer = peers[side];
@@ -1046,6 +1056,10 @@ int OnGap(ble_gap_event* event, void* arg) {
 void Scan(ble_npl_event*) {
     if (connecting || ble_gap_disc_active())
         return;
+    if (HandshakePending()) {
+        Retry();  // Resume after ready/disconnect without losing a one-shot retry.
+        return;
+    }
     bool wanted = false;
     for (const auto& peer : peers)
         wanted |= (peer.configured || peer.auto_allowed) && peer.phase == Phase::Idle;

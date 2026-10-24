@@ -14,13 +14,15 @@ class ReconnectTests(unittest.TestCase):
         start = source.index('        // Known bonded halves')
         end = source.index('        // Learn only undirected', start)
         match = source[start:end]
+        start = source.index('bool HandshakePending()')
+        handshake = source[start:source.index('\n}', start) + 2]
         shim = r'''
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
 struct ble_npl_event {};
-enum class Phase { Idle, Ready, Connecting };
+enum class Phase { Idle, Connecting, Security, Identity, Service, Characteristic, Ccc, Reading, Ready, Closing };
 struct Address { int type=0; uint8_t val[6]{}; };
 struct Peer { bool configured=true, auto_retry=false, auto_allowed=false;
  Phase phase=Phase::Idle; int64_t retry_after=0; Address address; } peers[2];
@@ -38,7 +40,7 @@ int ble_gap_disc(int,int duration,ble_gap_disc_params* p,int(*)(Event*,void*),vo
  assert(duration==5000);saved=*p;return 0;
 }
 '''
-        program = shim + scan + '\nint OnGap(Event* event,void*) {\n' + match + r'''
+        program = shim + handshake + scan + '\nint OnGap(Event* event,void*) {\n' + match + r'''
  return 0;
 }
 int main(){
@@ -62,6 +64,15 @@ int main(){
  active=true;saved.itvl=123;Scan(nullptr);assert(saved.itvl==123);
  active=false;peers[0].phase=peers[1].phase=Phase::Ready;
  Scan(nullptr);assert(saved.itvl==123);
+ peers[1].phase=Phase::Idle;event.disc.addr=peers[1].address;connected=-1;
+ for(Phase phase:{Phase::Connecting,Phase::Security,Phase::Identity,Phase::Service,
+                   Phase::Characteristic,Phase::Ccc,Phase::Reading}){
+  peers[0].phase=phase;int before=retry_count;Scan(nullptr);
+  assert(saved.itvl==123&&retry_count==before+1);
+  OnGap(&event,nullptr);assert(connected==-1);
+ }
+ peers[0].phase=Phase::Ready;Scan(nullptr);assert(saved.itvl==0x100);
+ OnGap(&event,nullptr);assert(connected==1);
 }
 '''
         with tempfile.TemporaryDirectory() as tmp:

@@ -94,6 +94,9 @@ void AudioService::Initialize(AudioCodec* codec) {
         }
     });
     audio_engine_->OnWakeWordDetected([this](const std::string& wake_word) {
+#if CONFIG_CUBE_SPLIT_BENCH
+        wake_diagnostic_status_ = 2;
+#endif
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
         if (callbacks_.on_wake_word_detected) {
             callbacks_.on_wake_word_detected(wake_word);
@@ -202,6 +205,9 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     if (codec_->input_sample_rate() != sample_rate) {
         data.resize(samples * codec_->input_sample_rate() / sample_rate * codec_->input_channels());
         if (!codec_->InputData(data)) {
+#if CONFIG_CUBE_SPLIT_BENCH
+            ++input_diagnostic_errors_;
+#endif
             return false;
         }
         if (input_resampler_ != nullptr) {
@@ -220,6 +226,9 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     } else {
         data.resize(samples * codec_->input_channels());
         if (!codec_->InputData(data)) {
+#if CONFIG_CUBE_SPLIT_BENCH
+            ++input_diagnostic_errors_;
+#endif
             return false;
         }
     }
@@ -227,6 +236,9 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     /* Update the last input time */
     last_input_time_ = std::chrono::steady_clock::now();
     debug_statistics_.input_count++;
+#if CONFIG_CUBE_SPLIT_BENCH
+    ++input_diagnostic_frames_;
+#endif
 
 #if CONFIG_USE_AUDIO_DEBUGGER
     // 音频调试：发送原始音频数据
@@ -662,17 +674,26 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     ESP_LOGD(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
     if (enable) {
         if (!InitializeAudioEngine()) {
+#if CONFIG_CUBE_SPLIT_BENCH
+            wake_diagnostic_status_ = -1;
+#endif
             xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
             return;
         }
 #if !(CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31)
         auto* lite_engine = static_cast<LiteAudioEngine*>(audio_engine_.get());
         if (!lite_engine->RestoreWakeWordResources()) {
+#if CONFIG_CUBE_SPLIT_BENCH
+            wake_diagnostic_status_ = -3;
+#endif
             xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
             return;
         }
 #endif
         if (!audio_engine_->HasWakeWord()) {
+#if CONFIG_CUBE_SPLIT_BENCH
+            wake_diagnostic_status_ = -2;
+#endif
             xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
             return;
         }
@@ -684,7 +705,13 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         }
         audio_engine_->EnableWakeWordDetection(true);
         xEventGroupSetBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
+#if CONFIG_CUBE_SPLIT_BENCH
+        wake_diagnostic_status_ = 1;
+#endif
     } else {
+#if CONFIG_CUBE_SPLIT_BENCH
+        wake_diagnostic_status_ = 0;
+#endif
         if (audio_engine_initialized_) {
             audio_engine_->EnableWakeWordDetection(false);
         }
