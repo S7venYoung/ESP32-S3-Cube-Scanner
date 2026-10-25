@@ -1,4 +1,4 @@
-2026-10-24 Build once after user-authorized targeted computer bond repair feature.
-Source 6033398c3100b0e8a9a14e116c9238c964daf978. Add explicit USB repair of only a fresh REPEAT_PAIRING target on the selected slot. Reject keyboard, unknown, expired and other-slot targets.
-Nine relevant tests passed. No automatic key deletion or flashing. User-authorized repair still requires fresh target validation after flashing.
-USB+BLE Cube dongle only. No scanner, USB-only, keyboard-half, companion build or Release replacement.
+USB+BLE dongle build requested by user.
+Source: 0068ed4d4385c3ce6ec1e265b1e25bd7e3553b7f
+Fix delayed computer CONNECT after successful advertising restart.
+Request: 2026-10-25 host lifetime callback repair.
