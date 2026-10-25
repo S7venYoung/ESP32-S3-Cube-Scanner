@@ -2,16 +2,21 @@
 #include <cstdint>
 
 namespace cube_dongle {
-// A failed advertising attempt must not invalidate a connection whose SDK
-// CONNECT callback is still waiting for remote-version/feature exchange.
+// Cookies belong to a host lifetime, not an advertising attempt. The SDK can
+// allocate a peripheral connection and delay CONNECT while another advertisement
+// starts successfully. Both attempts must retain the same valid callback cookie.
 class HostEpoch {
   public:
     uintptr_t Begin() {
         if (pending_)
             return 0;
-        if (++sequence_ == 0)
-            ++sequence_;
-        pending_ = sequence_;
+        if (active_)
+            pending_ = active_;
+        else {
+            if (++sequence_ == 0)
+                ++sequence_;
+            pending_ = sequence_;
+        }
         return pending_;
     }
     void Complete(int result) {

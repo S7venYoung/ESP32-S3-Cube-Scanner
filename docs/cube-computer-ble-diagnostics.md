@@ -110,15 +110,23 @@ callback cookie held by the SDK's already allocated connection. The delayed
 CONNECT and later DISCONNECT are silently rejected by the app's epoch guard.
 
 `HostEpoch` now keeps an active cookie plus a provisional advertising cookie.
-The active cookie is replaced only when advertising actually starts. Failed
-attempts cannot invalidate it. While the API is running, either active or
-provisional callbacks are accepted (callbacks need not be assumed asynchronous).
-Recursive starts are blocked. A host reset invalidates both without reusing
-sequence values. Later successful sessions still reject stale cookies.
+The original fix replaced the active cookie only on a successful advertising
+start. That covered exhausted pools but missed the same delayed callback when
+there was capacity for another successful advertising start.
 
-`DONGLE HOST` now includes `HOST-EPOCH=2`. Regression tests reproduce the old
-comparison failure and cover 100 failed retries, delayed CONNECT acceptance,
-callbacks during an advertising call, success invalidating the old session,
+The corrected cookie belongs to the entire NimBLE host lifetime. Once the first
+advertisement starts, both successful and unsuccessful retries reuse that cookie.
+While the initial API call is running its provisional callback is accepted.
+Recursive starts remain blocked. Host reset invalidates both cookies without
+reusing sequence values; a reset inside advertising start cannot resurrect one.
+A second successful computer CONNECT is terminated instead of overwriting the
+first link's authorization and HID state. Disconnect/security/notification events
+still have to match the adopted connection handle; security and ownership gates
+are unchanged.
+
+`DONGLE HOST` now includes `HOST-EPOCH=3`. Regression tests reproduce the old
+comparison failure and cover 100 failed and 100 successful retries, delayed
+CONNECT acceptance, callbacks during an advertising call, host-reset invalidation,
 reentrant starts and reset cancellation. No pool sizes, bonding, security gates,
 split connection logic or existing Release are changed. Hardware acceptance is
 still needed with both halves and the Mac: pairing, HID typing, host cycling,

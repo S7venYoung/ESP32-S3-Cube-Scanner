@@ -488,6 +488,14 @@ int Gap(ble_gap_event* event, void* arg) {
             Advertise();
             return 0;
         }
+        // Multiple advertisements can complete before the SDK delivers CONNECT.
+        // Keep the first computer link; never overwrite its authorization/HID
+        // state with a second peripheral connection from the same host lifetime.
+        if (connection != BLE_HS_CONN_HANDLE_NONE) {
+            if (connection != event->connect.conn_handle)
+                ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            return 0;
+        }
         connection = event->connect.conn_handle;
         host_diagnostics.NewConnection();
 #if CONFIG_CUBE_STUDIO_RPC
