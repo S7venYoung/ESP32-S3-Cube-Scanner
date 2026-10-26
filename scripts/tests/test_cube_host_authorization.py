@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class HostAuthorizationTests(unittest.TestCase):
     def test_identity_and_persistence_races(self):
         source = (ROOT / 'main/scanner/cube_ble_dongle.cc').read_text()
-        production = source[source.index('bool UnresolvedPrivate('):source.index('void Advertise()')]
+        production = source[source.index('bool UnresolvedPrivate('):source.index('void SampleRadioPools();')]
         shim = r'''
 #include <cassert>
 #include <atomic>

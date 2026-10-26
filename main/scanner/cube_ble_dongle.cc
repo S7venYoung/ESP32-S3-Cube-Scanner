@@ -79,6 +79,7 @@ int64_t security_after = 0;
 cube_dongle::HostDiagnostics host_diagnostics;
 cube_dongle::HostEpoch host_epoch;
 int64_t advertisement_next = 0, transition_started = 0;
+int64_t advertisement_stop_next = 0;
 std::atomic<uint32_t> ui_notice{0};
 uint32_t notice_sequence = 0;
 void Notice(unsigned kind) { ui_notice = (++notice_sequence << 8) | (selected << 3) | kind; }
@@ -338,7 +339,23 @@ void AuthorizeAfterPersistence() {
     }
 }
 void SampleRadioPools();
+void StopConnectedAdvertising() {
+    // The SDK may start a replacement advertisement before delivering the first
+    // CONNECT. Merely returning from Advertise() leaves that advertisement live
+    // after the computer is adopted, competing with split connection attempts.
+    if (connection == BLE_HS_CONN_HANDLE_NONE || !ble_gap_adv_active())
+        return;
+    const auto now = esp_timer_get_time();
+    if (now < advertisement_stop_next)
+        return;
+    advertisement_stop_next = now + 250000;
+    const int rc = ble_gap_adv_stop();
+    host_diagnostics.adv_stop_rc = rc;
+    if (rc && rc != BLE_HS_EALREADY)
+        ESP_LOGW(kTag, "Connected computer advertising stop failed rc=%d", rc);
+}
 void Advertise() {
+    StopConnectedAdvertising();
     if (!synced || !configured || connection != BLE_HS_CONN_HANDLE_NONE || transition ||
         host_epoch.Pending() ||
         (!profiles[selected].bound && esp_timer_get_time() >= pairing_until))
@@ -497,6 +514,8 @@ int Gap(ble_gap_event* event, void* arg) {
             return 0;
         }
         connection = event->connect.conn_handle;
+        advertisement_stop_next = 0;
+        StopConnectedAdvertising();
         host_diagnostics.NewConnection();
 #if CONFIG_CUBE_STUDIO_RPC
         studio_subscribed = false;
@@ -1074,6 +1093,7 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+    advertisement_stop_next = 0;
     repair_candidate.valid = false;
     CubeUsbRelease();  // USB must release even while the shared radio host is down.
     physical_input = {};

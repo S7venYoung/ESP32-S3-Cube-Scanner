@@ -13,7 +13,7 @@ struct HostDiagnostics {
         pool_gatt{0xffffffff}, nimble_limit{0};
     std::atomic<bool> pool_scan_complete{false};
     std::atomic<bool> repair_ready{false};
-    std::atomic<int> adv_stage{0}, adv_rc{0}, connect_rc{-1}, security_rc{-1},
+    std::atomic<int> adv_stage{0}, adv_rc{0}, adv_stop_rc{-1}, connect_rc{-1}, security_rc{-1},
         encryption_rc{-1}, disconnect_reason{-1}, auth_reason{0}, keys{0};
     void NewConnection() {
         ++connects;
@@ -41,6 +41,7 @@ struct HostDiagnostics {
                " MAX-LINKS=" + std::to_string(max_links.load()) +
                " ADV-STAGE=" + std::to_string(adv_stage.load()) +
                " ADV-RC=" + std::to_string(adv_rc.load()) +
+               " ADV-STOP-RC=" + std::to_string(adv_stop_rc.load()) +
                " CONNECT-RC=" + std::to_string(connect_rc.load()) +
                " SECURITY-RC=" + std::to_string(security_rc.load()) +
                " ENC-RC=" + std::to_string(encryption_rc.load()) +

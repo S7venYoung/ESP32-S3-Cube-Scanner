@@ -132,6 +132,29 @@ split connection logic or existing Release are changed. Hardware acceptance is
 still needed with both halves and the Mac: pairing, HID typing, host cycling,
 Cube power cycling, and confirming no untracked third connection remains.
 
+## Stop surplus advertising after adopting a computer
+
+The HOST-EPOCH=3 device capture showed an encrypted, bonded, subscribed computer
+on slot 2 with `LINK=1 BLE-READY=1 ADV=1`. Both half advertisements were arriving,
+but `ble_gap_connect()` immediately returned 525 (HCI 0x0d, connection rejected
+due to limited resources); neither half reached security. The free-pool values
+were historical advertisement samples and do not prove current controller room.
+
+A successful retry can start a replacement advertisement before the delayed
+computer CONNECT is delivered. The old `Advertise()` guard stopped future starts
+but did not stop that already-running advertisement. After adopting the first
+computer connection, the firmware now immediately stops any remaining computer
+advertisement. The host timer also retries a failed stop at most every 250 ms.
+This does not disconnect the computer, modify split scanning, or erase bonds.
+When no computer is connected the helper does nothing, preserving the existing
+pairing and computer-reconnection behavior. `ADV-STOP-RC` reports the latest stop
+result (-1 means not attempted); `ADV` remains the current active-state snapshot.
+
+Tests execute the production helper with controller stubs, including successful
+stop, bounded retry, disconnected pairing, and callback/timer integration. Actual
+resolution of error 525 still requires hardware acceptance: computer `ADV=0`,
+both halves ready, HID typing, half power cycling and Cube power cycling.
+
 ## Explicit, one-computer bond repair (USB command)
 
 An existing unowned key can trigger REPEAT_PAIRING while the selected slot is
