@@ -52,18 +52,18 @@ std::vector<Sent> sent;
 bool CubeSplitQueueRelay(unsigned side,const std::string& name,const std::vector<uint8_t>& data){sent.push_back({side,name,data});return true;}
 ''' + production + r'''
 int main(){
- PublishKeyboardDashboard();assert(sent.size()==3);
- assert(sent[0].side==1&&sent[0].name=="vlcat"&&sent[0].data[1]==0);
- assert(sent[2].side==2&&sent[2].name=="vldash"&&sent[2].data[2]==(CONFIG_CUBE_USB_DONGLE_OUTPUT?1:0));
+ // Layer updates have their own immediate mailbox, not this 1Hz dashboard.
+ PublishKeyboardDashboard();assert(sent.size()==1);
+ assert(sent[0].side==2&&sent[0].name=="vldash"&&sent[0].data[2]==(CONFIG_CUBE_USB_DONGLE_OUTPUT?1:0));
  sent.clear();now=500;PublishKeyboardDashboard();assert(sent.empty());
  now=1000;relay_jobs.push_back(1);PublishKeyboardDashboard();assert(sent.empty());
  relay_jobs.clear();relay_ready=2;keyboard.layer=3;ble=ble_ready=true;
- PublishKeyboardDashboard();assert(sent.size()==2);
- assert(sent[0].side==2&&sent[0].data[1]==3);
- assert(sent[1].data[2]==(CONFIG_CUBE_BLE_DONGLE_OUTPUT?2:CONFIG_CUBE_USB_DONGLE_OUTPUT?1:0));
- assert(sent[1].data[3]==(CONFIG_CUBE_BLE_DONGLE_OUTPUT?5:0));
+ PublishKeyboardDashboard();assert(sent.size()==1);
+ assert(sent[0].side==2&&sent[0].name=="vldash");
+ assert(sent[0].data[2]==(CONFIG_CUBE_BLE_DONGLE_OUTPUT?2:CONFIG_CUBE_USB_DONGLE_OUTPUT?1:0));
+ assert(sent[0].data[3]==(CONFIG_CUBE_BLE_DONGLE_OUTPUT?5:0));
  sent.clear();now=2000;enabled=false;PublishKeyboardDashboard();
- assert(sent.size()==2&&sent[1].data[2]==0&&sent[1].data[3]==0);
+ assert(sent.size()==1&&sent[0].data[2]==0&&sent[0].data[3]==0);
  sent.clear();now=3000;relay_ready=0;PublishKeyboardDashboard();assert(sent.empty());
  return 0;
 }
