@@ -15,6 +15,7 @@
 #endif
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "../../experimental/cube_dongle/split_relay.h"
+#include "../../experimental/cube_dongle/layer_sync.h"
 #include "../../experimental/cube_dongle/velvet_positions.h"
 
 #include <esp_log.h>
@@ -212,6 +213,7 @@ struct RelayJob {
 };
 std::mutex relay_jobs_mutex;
 std::deque<RelayJob> relay_jobs;
+cube_dongle::LayerSync layer_sync;
 std::mutex dashboard_mutex;
 cube_dongle::KeyboardDashboard dashboard;
 
@@ -231,6 +233,7 @@ cube_dongle::KeyboardState<61, 4> keyboard(cube_dongle::VelvetStudioKeymap());
 cube_dongle::KeyboardState<61, 3> keyboard(cube_dongle::VelvetKeymap());
 #endif
 cube_dongle::ReportFrame keyboard_output;
+void PublishKeyboardLayers();
 void PublishKeyboard() {
     const auto physical = input.Combined();
     auto filtered = physical;
@@ -312,6 +315,7 @@ void PublishKeyboard() {
     if (pulse)
         publish(tapped, 0);  // Preserve an early ordinary tap as a real down/up pair.
     publish(filtered, extra_actions);
+    PublishKeyboardLayers();
 }
 ble_npl_callout retry;
 ble_npl_callout telemetry_timer;
@@ -526,12 +530,19 @@ void PumpRelayJobs() {
     static size_t chunk_at = 0;
     static uint16_t value_handle = 0;
     static int64_t deadline = 0;
+    static bool prefer_layer = true;
     if (chunks.empty()) {
         std::lock_guard<std::mutex> lock(relay_jobs_mutex);
-        if (relay_jobs.empty())
+        cube_dongle::LayerSync::Update update;
+        if ((prefer_layer || relay_jobs.empty()) && layer_sync.Take(update)) {
+            job = {update.side, "vlcat", {1, update.layer}, update.generation};
+            prefer_layer = false;
+        } else if (!relay_jobs.empty()) {
+            job = std::move(relay_jobs.front());
+            relay_jobs.pop_front();
+            prefer_layer = true;
+        } else
             return;
-        job = std::move(relay_jobs.front());
-        relay_jobs.pop_front();
         chunk_at = 0;
         value_handle = 0;
         deadline = esp_timer_get_time() + 2000000;
@@ -643,6 +654,19 @@ int OnBattery(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, v
         peer->battery_pending = false;
     return 0;
 }
+// Called after key processing and on the 5ms host tick, not the 1s dashboard.
+// Coalesce each half to its latest state; never interrupt an in-flight relay.
+void PublishKeyboardLayers() {
+    const auto layer = keyboard.ActiveLayer();
+    if (layer >= 255)
+        return;
+    const uint64_t now = esp_timer_get_time() / 1000;
+    const auto ready = relay_ready.load();
+    std::lock_guard<std::mutex> lock(relay_jobs_mutex);
+    for (size_t side = 0; side < 2; ++side)
+        layer_sync.Observe(side, ready & (1u << side), relay_generations[side].load(),
+                           uint8_t(layer), now);
+}
 // Runs only on the existing NimBLE host thread; never creates another BLE host.
 void PublishKeyboardDashboard() {
     const uint64_t now = esp_timer_get_time() / 1000;
@@ -673,12 +697,9 @@ void PublishKeyboardDashboard() {
         std::lock_guard<std::mutex> lock(dashboard_mutex);
         packet = dashboard.Packet(output, profile, now);
     }
-    const auto layer = keyboard.ActiveLayer();
     for (unsigned source = 1; source <= 2; ++source) {
         if (!(relay_ready.load() & (1u << (source - 1))))
             continue;
-        if (layer < 255)
-            CubeSplitQueueRelay(source, "vlcat", {1, uint8_t(layer)});
         // Left is the fixed cat page; only the right consumes system metrics.
         if (source == 2)
             CubeSplitQueueRelay(source, DASH_EVENT, {packet.begin(), packet.end()});
@@ -1429,6 +1450,7 @@ void CubeSplitInputTick() {
             (!peer.caps_requested || peer.channel_at < peer.channel_count))
             OptionalSubscribe(peer);
     PumpForget();
+    PublishKeyboardLayers();
     PumpRelayJobs();
 #if CONFIG_CUBE_STUDIO_RPC
     const auto previous_layer = keyboard.ActiveLayer();
