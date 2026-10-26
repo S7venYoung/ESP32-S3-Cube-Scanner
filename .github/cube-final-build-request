@@ -1,3 +1,3 @@
-User requested USB+BLE dongle build on 2026-10-26.
-Source: 033d33ef7e501e518ae3cd4d869ad3b335aa7553
-Stop surplus computer advertising after CONNECT; preserve split bonds.
+User requested Cube USB+BLE dongle compilation on 2026-10-26.
+Source: d65aed3488c6a931c1935edcc1cd7f3540bec220
+Independent low-latency keyboard layer relay and corrected dashboard scheduler tests.
