@@ -1,5 +1,40 @@
 # Computer BLE pairing and HID diagnostics
 
+## Restored HID subscriptions and offline output switching (HID-RESTORE=1)
+
+The slot-2 capture had LINK/ENCRYPTED/BONDED/AUTHORIZED=1 and both halves ready,
+but KBD-SUB/BOOT-SUB/BLE-READY=0. A concrete lost-event path exists: IDF 6.1 delays
+the application CONNECT until remote feature exchange, while encrypted reconnects
+can restore CCCDs earlier. Previously those SUBSCRIBE events were ignored because
+the application had no matching handle, and CONNECT unconditionally cleared flags.
+
+The host queue now stages real WRITE/RESTORE notification/indication state in three
+bounded per-handle slots. Events must belong to a live peripheral-role connection,
+not a split identity, and match one of the registered HID/Studio value handles.
+CONNECT consumes only its own staged state; unsubscribe, disconnect and host reset
+prevent reuse. No notification is enabled without an actual SDK subscribe event.
+Authorization, encryption, key persistence, profile ownership and neutral-input
+barriers still gate all reports. This repairs a demonstrated code path; actual
+slot-switch typing still needs hardware verification.
+
+SUB-EARLY and SUB-REPLAY count staged events and adopted nonempty snapshots.
+INPUT-NEUTRAL, USB-HOST and USB-NEUTRAL explain output-switch waits. USB-HOST means
+enumerated and not suspended, not a guarantee the HID endpoint is idle right now.
+
+Output selection is a local command and does not require a paired computer. BLE
+with no connection already satisfies OldReleased. USB previously checked only
+enumeration: a suspended host could never complete a neutral report but was still
+waited on indefinitely. Release gates now use CubeUsbConnected (mounted and awake),
+not CubeUsbAttached. Live hosts still require neutral delivery; all physical keys,
+including a held layer key, must still be released before committing a transition.
+Thus no unsafe timeout bypasses neutral delivery to a working host.
+
+Tests execute production early-event/CONNECT initialization, per-handle cache
+isolation/cleanup, offline/suspended/live-host release decisions, and existing
+security/slot-switch paths. No keyboard firmware or bond deletion is required.
+
+SDK reference: [CCCD restoration](https://github.com/espressif/esp-nimble/blob/139cada0ae932957fa06ba37d17e3c9c2c95c773/nimble/host/src/ble_gatts.c).
+
 ## Explicit USB is exclusive (PAIR-POLICY=3)
 
 This supersedes the policy below only for explicit USB selection. OUT_USB waits

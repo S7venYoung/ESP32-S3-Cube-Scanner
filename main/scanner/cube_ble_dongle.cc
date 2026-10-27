@@ -29,6 +29,7 @@
 #include "../../experimental/cube_dongle/host_cycle.h"
 #include "../../experimental/cube_dongle/host_diagnostics.h"
 #include "../../experimental/cube_dongle/host_epoch.h"
+#include "../../experimental/cube_dongle/early_subscriptions.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
@@ -78,6 +79,7 @@ bool security_start_pending = false;
 int64_t security_after = 0;
 cube_dongle::HostDiagnostics host_diagnostics;
 cube_dongle::HostEpoch host_epoch;
+cube_dongle::EarlySubscriptions early_subscriptions;
 int64_t advertisement_next = 0, transition_started = 0;
 int64_t advertisement_stop_next = 0;
 std::atomic<uint32_t> ui_notice{0};
@@ -194,6 +196,8 @@ int StudioAccess(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctx, void*) {
 #endif
 void Publish() {
     host_diagnostics.repair_ready = RepairCandidateValid();
+    host_diagnostics.switch_flags = (physical_neutral ? 1u : 0u) |
+        (CubeUsbConnected() ? 2u : 0u) | (CubeUsbNeutralDelivered() ? 4u : 0u);
     ble_gap_conn_desc diagnostic_connection{};
     const bool link = connection != BLE_HS_CONN_HANDLE_NONE &&
                       !ble_gap_conn_find(connection, &diagnostic_connection);
@@ -500,9 +504,43 @@ void Pump() {
 int Gap(ble_gap_event* event, void* arg) {
     if (!host_epoch.Accept(reinterpret_cast<uintptr_t>(arg)))
         return 0;
+    if (event->type == BLE_GAP_EVENT_DISCONNECT)
+        early_subscriptions.Take(event->disconnect.conn.conn_handle);
+    if (event->type == BLE_GAP_EVENT_SUBSCRIBE &&
+        connection != event->subscribe.conn_handle) {
+        // IDF 6.1 can restore CCCDs after encryption but before delayed CONNECT.
+        // Cache only real events on a live peripheral-role connection; split
+        // central links and arbitrary handles can never establish HID readiness.
+        ble_gap_conn_desc desc{};
+        if (!ble_gap_conn_find(event->subscribe.conn_handle, &desc) &&
+            desc.role == BLE_GAP_ROLE_SLAVE &&
+            !CubeSplitIsKeyboard(desc.peer_id_addr.val, desc.peer_id_addr.type & 1)) {
+            uint8_t channel = 0;
+            bool subscribed = event->subscribe.cur_notify;
+            using Sub = cube_dongle::EarlySubscriptions;
+            if (event->subscribe.attr_handle == keyboard_handle)
+                channel = Sub::Keyboard;
+            else if (event->subscribe.attr_handle == media_handle)
+                channel = Sub::Media;
+            else if (event->subscribe.attr_handle == boot_handle)
+                channel = Sub::Boot;
+            else if (event->subscribe.attr_handle == pointer_handle)
+                channel = Sub::Pointer;
+#if CONFIG_CUBE_STUDIO_RPC
+            else if (event->subscribe.attr_handle == studio_handle) {
+                channel = Sub::Studio;
+                subscribed = event->subscribe.cur_indicate;
+            }
+#endif
+            if (early_subscriptions.Observe(event->subscribe.conn_handle, channel, subscribed))
+                ++host_diagnostics.early_sub_events;
+        }
+        return 0;
+    }
     if (event->type == BLE_GAP_EVENT_CONNECT) {
         host_diagnostics.connect_rc = event->connect.status;
         if (event->connect.status) {
+            early_subscriptions.Take(event->connect.conn_handle);
             Advertise();
             return 0;
         }
@@ -510,6 +548,7 @@ int Gap(ble_gap_event* event, void* arg) {
         // Bluetooth endpoint after an explicit USB selection.
         if (preference == Output::Usb ||
             (transition && pending.command == HostCommand::Usb)) {
+            early_subscriptions.Take(event->connect.conn_handle);
             ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
             return 0;
         }
@@ -517,24 +556,34 @@ int Gap(ble_gap_event* event, void* arg) {
         // Keep the first computer link; never overwrite its authorization/HID
         // state with a second peripheral connection from the same host lifetime.
         if (connection != BLE_HS_CONN_HANDLE_NONE) {
-            if (connection != event->connect.conn_handle)
+            if (connection != event->connect.conn_handle) {
+                early_subscriptions.Take(event->connect.conn_handle);
                 ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
             return 0;
         }
         connection = event->connect.conn_handle;
+        const auto restored_subscriptions = early_subscriptions.Take(connection);
+        using Sub = cube_dongle::EarlySubscriptions;
+        if (restored_subscriptions)
+            ++host_diagnostics.early_sub_replays;
         advertisement_stop_next = 0;
         StopConnectedAdvertising();
         host_diagnostics.NewConnection();
 #if CONFIG_CUBE_STUDIO_RPC
         studio_subscribed = false;
         StudioReset();
+        studio_subscribed = restored_subscriptions & Sub::Studio;
 #endif
         authorized = false;
         security_pending = false;
         security_start_pending = false;
         protocol = 1;
         suspended = false;
-        keyboard_sub = media_sub = boot_sub = pointer_sub = false;
+        keyboard_sub = restored_subscriptions & Sub::Keyboard;
+        media_sub = restored_subscriptions & Sub::Media;
+        boot_sub = restored_subscriptions & Sub::Boot;
+        pointer_sub = restored_subscriptions & Sub::Pointer;
         ReleaseBle();
         ble_gap_conn_desc desc{};
         int rejected = 0;
@@ -889,7 +938,7 @@ bool WantBle() {
 }
 bool OldReleased() {
     return old_ble ? (connection == BLE_HS_CONN_HANDLE_NONE || neutral_sent)
-                   : (!CubeUsbAttached() || CubeUsbNeutralDelivered());
+                   : (!CubeUsbConnected() || CubeUsbNeutralDelivered());
 }
 void BeginTransition(HostRequest request) {
     if (request.command == HostCommand::Repair && !RepairCandidateValid()) {
@@ -1101,6 +1150,7 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+    early_subscriptions.Clear();
     advertisement_stop_next = 0;
     repair_candidate.valid = false;
     CubeUsbRelease();  // USB must release even while the shared radio host is down.
@@ -1144,7 +1194,7 @@ void CubeDualTick() {
     if (pending_system) {
         const bool released = system_old_ble
             ? (connection == BLE_HS_CONN_HANDLE_NONE || neutral_sent)
-            : (!CubeUsbAttached() || CubeUsbNeutralDelivered());
+            : (!CubeUsbConnected() || CubeUsbNeutralDelivered());
         if (physical_neutral && released) {
             const auto action = pending_system;
             pending_system = 0;
@@ -1186,7 +1236,7 @@ void CubeDualTick() {
         barrier.Accept(
             physical_input,
             physical_neutral && (routed_ble ? (!NotifyReady() || neutral_sent)
-                                            : (!CubeUsbAttached() || CubeUsbNeutralDelivered())))) {
+                                            : (!CubeUsbConnected() || CubeUsbNeutralDelivered())))) {
         auto output = physical_input;
 #if CONFIG_CUBE_STUDIO_RPC
         output = CubeStudioMacroOutput(output);

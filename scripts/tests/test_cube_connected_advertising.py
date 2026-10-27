@@ -61,7 +61,7 @@ int main(){
                         adopted.index('host_diagnostics.NewConnection();'))
         tick = source[source.index('void CubeDualTick()'):source.index('void CubeDualSubmit(')]
         self.assertIn('Advertise();', tick)
-        disconnect = gap[gap.index('event->type == BLE_GAP_EVENT_DISCONNECT'):]
+        disconnect = gap[gap.index('} else if (event->type == BLE_GAP_EVENT_DISCONNECT'):]
         self.assertLess(disconnect.index('connection = BLE_HS_CONN_HANDLE_NONE;'),
                         disconnect.index('Advertise();'))
         diagnostics = (ROOT / 'experimental/cube_dongle/host_diagnostics.h').read_text()

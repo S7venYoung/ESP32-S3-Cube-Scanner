@@ -90,7 +90,7 @@ int main(){
         self.assertIn('repair_candidate.expires', source)
         # Clearing computer slots must still use exact peer deletion, not all bonds.
         self.assertNotIn('ble_store_clear(', source)
-        disconnect = source[source.index('event->type == BLE_GAP_EVENT_DISCONNECT'):]
+        disconnect = source[source.index('} else if (event->type == BLE_GAP_EVENT_DISCONNECT'):]
         self.assertLess(disconnect.index('connection = BLE_HS_CONN_HANDLE_NONE;'),
                         disconnect.index('Advertise();'))
 

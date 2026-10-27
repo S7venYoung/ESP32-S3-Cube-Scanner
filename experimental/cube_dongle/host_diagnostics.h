@@ -13,6 +13,7 @@ struct HostDiagnostics {
         pool_gatt{0xffffffff}, nimble_limit{0};
     std::atomic<bool> pool_scan_complete{false};
     std::atomic<bool> repair_ready{false};
+    std::atomic<uint32_t> early_sub_events{0}, early_sub_replays{0}, switch_flags{0};
     std::atomic<int> adv_stage{0}, adv_rc{0}, adv_stop_rc{-1}, connect_rc{-1}, security_rc{-1},
         encryption_rc{-1}, disconnect_reason{-1}, auth_reason{0}, keys{0};
     void NewConnection() {
@@ -59,7 +60,12 @@ struct HostDiagnostics {
                " POOL-MISSING=" + std::to_string(pools.Missing()) +
                " POOL-SCAN-COMPLETE=" + std::to_string(pool_scan_complete.load()) +
                " REPAIR-READY=" + std::to_string(repair_ready.load()) +
-               " PAIR-POLICY=3";
+               " PAIR-POLICY=3 HID-RESTORE=1" +
+               " SUB-EARLY=" + std::to_string(early_sub_events.load()) +
+               " SUB-REPLAY=" + std::to_string(early_sub_replays.load()) +
+               " INPUT-NEUTRAL=" + std::to_string(bool(switch_flags.load() & 1)) +
+               " USB-HOST=" + std::to_string(bool(switch_flags.load() & 2)) +
+               " USB-NEUTRAL=" + std::to_string(bool(switch_flags.load() & 4));
     }
 };
 }  // namespace cube_dongle
