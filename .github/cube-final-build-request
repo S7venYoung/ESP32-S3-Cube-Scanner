@@ -1,3 +1,3 @@
 User requested USB+BLE dongle build on 2026-10-27.
-Source: f95e1e4eb3ed0d48eb70c912baa3763c24948e5b
-ZMK-style persistent open-slot pairing and USB-independent reconnect advertising.
+Source: cf7262914f7654364d1bfba60672a7d65afaaec5
+Disconnect old computer when switching USB or BLE slots; preserve split links and pairing records.
