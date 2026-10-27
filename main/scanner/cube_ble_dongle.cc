@@ -86,7 +86,7 @@ void Notice(unsigned kind) { ui_notice = (++notice_sequence << 8) | (selected <<
 uint8_t own_type = 0, protocol = 1, leds = 0;
 uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
 uint16_t keyboard_handle, media_handle, boot_handle, pointer_handle;
-int64_t pairing_until = 0, security_deadline = 0, inflight_since = 0;
+int64_t security_deadline = 0, inflight_since = 0;
 uint32_t revision = 0, flight_revision = 0;
 unsigned phase = 0;
 uint16_t flight_handle = 0;
@@ -203,7 +203,7 @@ void Publish() {
         (authorized ? 8u : 0u) | ((security_pending || security_start_pending) ? 16u : 0u) |
         (keyboard_sub ? 32u : 0u) | (boot_sub ? 64u : 0u) |
         (ble_gap_adv_active() ? 128u : 0u) |
-        (esp_timer_get_time() < pairing_until ? 256u : 0u) |
+        (!profiles[selected].bound ? 256u : 0u) |
         (profiles[selected].bound ? 512u : 0u) | (protocol ? 1024u : 0u) |
         (suspended ? 2048u : 0u);
     const auto split_status = CubeSplitBenchStatus();
@@ -311,14 +311,15 @@ void AuthorizeAfterPersistence() {
         if (!valid)
             host_diagnostics.auth_reason = 5;  // Selected slot is a different computer.
     } else if (valid) {
-        valid = esp_timer_get_time() < pairing_until && SaveProfile(selected, &desc.peer_id_addr);
+        // Like ZMK: an empty selected profile stays open until a bonded peer
+        // passes identity/key checks and the profile is successfully persisted.
+        valid = SaveProfile(selected, &desc.peer_id_addr);
         if (valid) {
             profiles[selected].bound = true;
             profiles[selected].identity = desc.peer_id_addr;
             profiles[selected].identity.type &= 1;
-            pairing_until = 0;
         } else {
-            host_diagnostics.auth_reason = esp_timer_get_time() >= pairing_until ? 6 : 7;
+            host_diagnostics.auth_reason = 7;
             last_result = -1;
         }
     }
@@ -357,8 +358,7 @@ void StopConnectedAdvertising() {
 void Advertise() {
     StopConnectedAdvertising();
     if (!synced || !configured || connection != BLE_HS_CONN_HANDLE_NONE || transition ||
-        host_epoch.Pending() ||
-        (!profiles[selected].bound && esp_timer_get_time() >= pairing_until))
+        host_epoch.Pending())
         return;
     if (ble_gap_adv_active())
         return;
@@ -538,8 +538,6 @@ int Gap(ble_gap_event* event, void* arg) {
                  !Same(profiles[selected].identity, desc.peer_id_addr) &&
                  !UnresolvedPrivate(desc.peer_id_addr))
             rejected = 5;
-        else if (!profiles[selected].bound && esp_timer_get_time() >= pairing_until)
-            rejected = 6;
         if (rejected) {
             host_diagnostics.auth_reason = rejected;
             last_result = -5;
@@ -981,10 +979,6 @@ void ApplyPending() {
             enabled = true;
         if (request.command == HostCommand::Disable)
             enabled = false;
-        if (request.command == HostCommand::Pair || request.command == HostCommand::Select ||
-            request.command == HostCommand::Clear || request.command == HostCommand::ClearAll ||
-            request.command == HostCommand::Repair)
-            pairing_until = profiles[selected].bound ? 0 : esp_timer_get_time() + 120000000;
         last_result = 0;
     } else if (request.command != HostCommand::Repair)
         last_result = -1;
@@ -1192,8 +1186,6 @@ void CubeDualTick() {
         } else
             CubeUsbSubmit(output);
     }
-    if (!profiles[selected].bound && esp_timer_get_time() >= pairing_until && ble_gap_adv_active())
-        ble_gap_adv_stop();
     Advertise();
     Pump();
     Publish();

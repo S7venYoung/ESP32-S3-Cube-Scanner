@@ -27,7 +27,7 @@ struct ble_gap_conn_desc { struct { bool encrypted=true,bonded=true; } sec_state
 struct ble_store_key_sec { ble_addr_t peer_addr; };
 struct ble_store_value_sec { bool ltk_present=true,sc=true; int key_size=16; };
 struct Profile { bool bound=false;ble_addr_t identity; } profiles[5];
-unsigned selected=0;int connection=1;int64_t now=100,security_deadline=30000,pairing_until=20000;
+unsigned selected=0;int connection=1;int64_t now=100,security_deadline=30000;
 bool security_pending=true,authorized=false,routed_ble=false;
 bool keys_ready=true,save_ok=true,split=false;int terminated=0,saves=0,key_size=16;
 std::atomic<int> last_result{0};const char* kTag="test";
@@ -43,7 +43,7 @@ void ReleaseBle(){}struct {void Begin(){}} barrier;
 bool NotifyReady(){return false;}void Notice(int){}
 void ble_gap_terminate(int,int){++terminated;}
 void Reset(){for(auto& p:profiles)p={};desc={};desc.peer_id_addr.val[0]=7;
- now=100;security_deadline=30000;pairing_until=20000;security_pending=true;
+ now=100;security_deadline=30000;security_pending=true;
  authorized=false;keys_ready=true;save_ok=true;split=false;terminated=saves=0;key_size=16;last_result=0;}
 '''
         program = shim + production + r'''
@@ -68,7 +68,10 @@ int main(){
  assert(host_diagnostics.auth_reason==4);
  Reset();key_size=12;AuthorizeAfterPersistence();assert(!authorized&&security_pending&&!terminated);
  now=security_deadline;AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&!saves);
- Reset();pairing_until=0;AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&!saves);
+ // An empty slot is still pairable after a day of USB operation. The security
+ // exchange still has its own finite deadline, independent of slot openness.
+ Reset();now=86400000000LL;security_deadline=now+30000000;
+ AuthorizeAfterPersistence();assert(authorized&&!terminated&&saves==1);
  Reset();save_ok=false;AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&!profiles[0].bound);
  Reset();split=true;now=security_deadline;AuthorizeAfterPersistence();assert(!authorized&&terminated==1&&!saves);
  Reset();desc.sec_state.encrypted=false;AuthorizeAfterPersistence();assert(!authorized&&!saves);

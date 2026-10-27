@@ -58,7 +58,8 @@ struct HostDiagnostics {
                " POOL-BLOCKED=" + std::to_string(pools.Blocked()) +
                " POOL-MISSING=" + std::to_string(pools.Missing()) +
                " POOL-SCAN-COMPLETE=" + std::to_string(pool_scan_complete.load()) +
-               " REPAIR-READY=" + std::to_string(repair_ready.load());
+               " REPAIR-READY=" + std::to_string(repair_ready.load()) +
+               " PAIR-POLICY=2";
     }
 };
 }  // namespace cube_dongle

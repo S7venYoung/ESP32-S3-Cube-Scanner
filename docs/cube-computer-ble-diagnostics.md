@@ -1,5 +1,30 @@
 # Computer BLE pairing and HID diagnostics
 
+## ZMK-style open-profile advertising (PAIR-POLICY=2)
+
+An empty selected computer slot now remains open for pairing: there is no 120s
+timeout. USB/BLE output preference does not determine whether the slot advertises.
+An occupied slot advertises when disconnected and accepts only its existing
+computer; an adopted computer connection stops surplus advertising. Switching
+slots or explicitly clearing computer slots refreshes the same state machine.
+The existing PAIR command remains compatible (empty slot succeeds; occupied slot
+is not silently cleared). Status PAIR-WINDOW now means the selected slot is open,
+not a countdown; PAIR-POLICY=2 identifies this behavior. Historical sections below
+describe the earlier timeout policy and are superseded by this section.
+
+An empty slot is intentionally discoverable for longer, matching the reference
+ZMK behavior. Encryption, SC/16-byte keys, persistent identity, split-peer rejection,
+other-slot ownership, the per-connection security deadline and explicit one-peer
+bond-repair authorization are unchanged. No automatic key overwrite/deletion,
+controller-limit increase, split-bond reset, or computer-name/USB identity change.
+In particular, open advertising does not itself remove orphaned computer keys.
+
+Tests execute production advertising under controller stubs across long idle,
+connect/disconnect and USB-independent conditions; authorization tests verify
+empty-slot pairing after a day's idle while rejecting invalid or foreign peers.
+Hardware acceptance still requires fresh Mac pairing, reconnect, USB/BLE routing,
+slot switching, and both halves remaining connected. No build is auto-triggered.
+
 Scope: USB+BLE dongle branch only. The working split connection/bond recovery
 implementation, keyboard firmware, GPIO assignments and release binary remain
 unchanged. No automatic Actions or pairing erasure.
