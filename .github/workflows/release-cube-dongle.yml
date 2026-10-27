@@ -17,9 +17,9 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      SOURCE_RUN: '40064188721'
-      SOURCE_SHA: 51182eaf2343c3e1beee0186c6840121f004068e
-      RELEASE_TAG: cube-dongle-2026.10.24
+      SOURCE_RUN: '40474778011'
+      SOURCE_SHA: dfddf7eccbd97c5912b436c55882ac0259ab5258
+      RELEASE_TAG: cube-dongle-2026.10.27
       RELEASE_SHA: ${{ github.sha }}
     steps:
       - name: Verify and download the hardware-accepted build without compiling
@@ -28,18 +28,18 @@ jobs:
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > run.json
           jq -e --arg sha "$SOURCE_SHA" '.status == "completed" and .conclusion == "success" and .head_sha == $sha and .head_branch == "codex/xingzhi-cube-dongle"' run.json
           gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/artifacts" > artifacts.json
-          jq -e '[.artifacts[] | select(.id == 12549185769 and .name == "Cube-Dual-Dongle" and .expired == false)] | length == 1' artifacts.json
+          jq -e '[.artifacts[] | select(.id == 12721170431 and .name == "Cube-Dual-Dongle" and .expired == false and .digest == "sha256:63ed7d358a7f8e0e55fbb40111261444df5ecb412346947d30c143f0d44844d3")] | length == 1' artifacts.json
           gh run download "$SOURCE_RUN" --name Cube-Dual-Dongle --dir firmware
           test -f firmware/merged-binary.bin
           test -f firmware/xingzhi_cube_dual_candidate.bin
           test -f firmware/xiaozhi.bin
           cmp firmware/xiaozhi.bin firmware/xingzhi_cube_dual_candidate.bin
           (cd firmware && sha256sum -c SHA256SUMS)
-      - name: Preserve the two exact historical releases before removal
+      - name: Preserve the approved historical release before removal
         run: |
           set -euo pipefail
           mkdir -p historical-release-backup
-          for item in '419344967:cube-dongle-2026.10.21' '419351686:cube-scanner-2026.10.21'; do
+          for item in '422658724:cube-dongle-2026.10.24'; do
             id=${item%%:*}
             tag=${item#*:}
             mkdir -p "historical-release-backup/$tag"
@@ -49,7 +49,7 @@ jobs:
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: Historical-releases-before-2026.10.24
+          name: Historical-releases-before-2026.10.27
           path: historical-release-backup/
           retention-days: 90
           if-no-files-found: error
@@ -57,46 +57,49 @@ jobs:
         run: |
           set -euo pipefail
           mkdir release
-          (cd firmware && zip -qr ../release/Cube-Velvet-Pro-Dongle-2026.10.24.zip .)
+          (cd firmware && zip -qr ../release/Cube-Velvet-Pro-Dongle-2026.10.27.zip .)
           cp firmware/merged-binary.bin firmware/xiaozhi.bin firmware/xingzhi_cube_dual_candidate.bin release/
           (cd release && sha256sum *.bin *.zip > SHA256SUMS)
           cat > notes.md <<'NOTES'
           星智 Cube 1.54 TFT Wi-Fi：Cube Velvet Pro USB + BLE 双模 dongle。
-
-          ## 本次修复
-
-          - 修复 ESP-IDF 6.1 / NimBLE 动态启动再次初始化存储、覆盖配对保存回调的问题。启动同步后、广播及扫描前重新安装；主机复位后同样处理。
-          - 保留已有配对和单条密钥更新掉电恢复机制，不自动清除键盘、电脑、Wi-Fi 或小智配置。
-          - 增加连接建立失败/连接后断开的阶段诊断；`DONGLE SPLIT DIAG` 可见 `store_sync=2 store_hooks=1`。
-
-          保留小智、现有主题、Codex 同步、DYA 和 USB/BLE 输出功能。电脑蓝牙名称为 **Cube Velvet Pro**。
-
-          ## 实机验证范围
-
-          用户已确认本版可用，并多次重启 Cube 验证左右手自动回连。最近一次读取日志：左右手均 `phase=8`，各尝试一次，无连接错误；约开机后 3 秒/5 秒恢复。此验证不等于所有硬件、长时间运行或所有 DYA/语音场景已覆盖。
-
-          ## 下载及更新
-
-          - 已安装兼容 dongle 固件、只更新应用：`xiaozhi.bin`（与 `xingzhi_cube_dual_candidate.bin` 完全相同）。选择刷机工具的**仅更新应用**模式，按现有分区配置更新，不要从 0x0 刷应用镜像。
-          - 首次安装/需要完整固件：下载 ZIP，按包内说明使用 `merged-binary.bin` 完整镜像。不要默认全片擦除或清除配对；完整镜像与应用镜像不可混用。
-          - ZIP 保留资源、分区、引导程序及构建校验文件；发布附件另有 `SHA256SUMS`。不包含左右手键盘 UF2 或 macOS 配套程序。
-          - 已刷入并验证本次 Action 固件的用户无需重复刷写。本发布复用原始二进制，**没有重新编译，也没有改变固件内容**。
-
-          来源分支：`codex/xingzhi-cube-dongle`；源码：`51182eaf2343c3e1beee0186c6840121f004068e`。
-          发布标签指向仅更新发布流程的提交；二进制仍严格来自上述源码和构建，没有加入后续固件改动。
-          成功构建：https://github.com/S7venYoung/ESP32-S3-Cube-Scanner/actions/runs/40064188721
+          
+          ## 本版改进
+          
+          - 修复蓝牙切槽重连时 CCCD 订阅提前恢复却被连接初始化清空的问题，保留真正收到的 HID/Studio 订阅事件，并继续执行加密、身份与卡槽授权校验。
+          - 切换 USB 或其他蓝牙卡槽时，先释放按键并断开旧电脑/手机连接；显式 USB 模式停止主机蓝牙广播，左右手连接与配对保留。
+          - 修复 USB 挂起时通道切换一直等待旧主机松键报告的问题。切换仍需松开所有按键，包括层切换键。
+          - 蓝牙空卡槽不再限时 120 秒；蓝牙/AUTO 模式断线后自动广播，显式 USB 模式除外。
+          - 层级显示使用独立的最新状态回传通道，不再等待每秒系统信息同步；完整的键盘屏幕 50ms 刷新需配套左右手固件。
+          
+          保留现有小智、主题、Codex 同步、DYA、USB/BLE HID 及左右手重连功能。电脑蓝牙名称为 **Cube Velvet Pro**。本包不包含左右手 UF2 或 macOS 配套程序。
+          
+          ## 实机验证
+          
+          用户确认本次 Action 固件“这一版完全可用了”。这是当前硬件上的验收结果，不代表所有主机系统、长期运行、语音及 DYA 场景都已穷尽验证。
+          
+          ## 下载与刷写
+          
+          - 已安装兼容 dongle 固件，仅更新应用：使用 `xiaozhi.bin`，与 `xingzhi_cube_dual_candidate.bin` 字节相同。选择刷机工具的“仅更新应用”，不要把应用 BIN 当作 0x0 完整镜像。
+          - 首次安装或完整刷写：下载 `Cube-Velvet-Pro-Dongle-2026.10.27.zip`，按现有包内刷写说明使用 `merged-binary.bin`。不要默认全片擦除或清除配对。
+          - ZIP 保留原始资源、引导程序、分区和构建校验文件；发布附件另有 SHA256SUMS。
+          - 已刷入并验证本次 Action 的用户无需重复刷写：本 Release **复用原始二进制，不重新编译**。
+          
+          固件源码：`dfddf7eccbd97c5912b436c55882ac0259ab5258`，分支：`codex/xingzhi-cube-dongle`。
+          原始成功构建：https://github.com/S7venYoung/ESP32-S3-Cube-Scanner/actions/runs/40474778011
+          发布标签指向仅调整发布流程的提交；固件严格来自上述构建，未加入其他固件改动。
+          旧版 2026.10.24 Release 在新版发布成功后删除，Git 标签保留；旧附件归档为本次发布 Action 的 Historical-releases-before-2026.10.27（保留 90 天）。
           NOTES
           gh release create "$RELEASE_TAG" release/* --target "$RELEASE_SHA" \
-            --title "Cube Velvet Pro USB + BLE Dongle · 2026.10.24" --draft --notes-file notes.md
+            --title "Cube Velvet Pro USB + BLE Dongle · 2026.10.27" --draft --notes-file notes.md
           gh release view "$RELEASE_TAG" --json assets > published-assets.json
           jq -e '.assets | length == 5 and all(.[]; .state == "uploaded" and .size > 0)' published-assets.json
           gh release edit "$RELEASE_TAG" --draft=false --latest
           gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > published.json
           jq -e --arg sha "$RELEASE_SHA" '.draft == false and .prerelease == false and .target_commitish == $sha and (.assets | length == 5)' published.json
-      - name: Remove only the two approved old releases after publishing succeeds
+      - name: Remove only the approved old release after publishing succeeds
         run: |
           set -euo pipefail
-          for item in '419344967:cube-dongle-2026.10.21' '419351686:cube-scanner-2026.10.21'; do
+          for item in '422658724:cube-dongle-2026.10.24'; do
             id=${item%%:*}
             tag=${item#*:}
             test "$tag" != "$RELEASE_TAG"
