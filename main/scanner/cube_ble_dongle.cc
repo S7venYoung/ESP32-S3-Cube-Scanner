@@ -357,7 +357,8 @@ void StopConnectedAdvertising() {
 }
 void Advertise() {
     StopConnectedAdvertising();
-    if (!synced || !configured || connection != BLE_HS_CONN_HANDLE_NONE || transition ||
+    if (!synced || !configured || preference == Output::Usb ||
+        connection != BLE_HS_CONN_HANDLE_NONE || transition ||
         host_epoch.Pending())
         return;
     if (ble_gap_adv_active())
@@ -503,6 +504,13 @@ int Gap(ble_gap_event* event, void* arg) {
         host_diagnostics.connect_rc = event->connect.status;
         if (event->connect.status) {
             Advertise();
+            return 0;
+        }
+        // A CONNECT already queued by the controller must not reopen the host
+        // Bluetooth endpoint after an explicit USB selection.
+        if (preference == Output::Usb ||
+            (transition && pending.command == HostCommand::Usb)) {
+            ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
             return 0;
         }
         // Multiple advertisements can complete before the SDK delivers CONNECT.
@@ -921,10 +929,15 @@ void BeginTransition(HostRequest request) {
     ReleaseBle();
     ble_gap_adv_stop();
 }
+bool MustDisconnectComputer(HostCommand command) {
+    return command == HostCommand::Usb || command == HostCommand::Select ||
+           command == HostCommand::Clear || command == HostCommand::ClearAll ||
+           command == HostCommand::ClearSlot || command == HostCommand::Repair;
+}
 void ApplyPending() {
     const auto request = pending;
-    pending = {};
     if (request.command == HostCommand::Pair && profiles[selected].bound) {
+        pending = {};
         last_result = -3;
         Notice(3);
         command_result = -3;
@@ -948,14 +961,15 @@ void ApplyPending() {
         next_output = Output::Ble;
     if (request.command == HostCommand::Repair)
         next_output = Output::Ble;
-    if (request.command == HostCommand::Select || request.command == HostCommand::Clear ||
-        request.command == HostCommand::ClearAll || request.command == HostCommand::ClearSlot ||
-        request.command == HostCommand::Repair) {
+    if (request.command == HostCommand::Pair)
+        next_output = Output::Ble;
+    if (MustDisconnectComputer(request.command)) {
         if (connection != BLE_HS_CONN_HANDLE_NONE) {
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             return;
         }
     }
+    pending = {};
     bool okay = SaveSelection(next_profile, next_output);
     if (request.command == HostCommand::Repair) {
         last_result = -1;
@@ -1162,10 +1176,7 @@ void CubeDualTick() {
         ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
     if (transition && OldReleased() && physical_neutral) {
         // Keep the request until the disconnect callback has completed.
-        if ((pending.command == HostCommand::Select || pending.command == HostCommand::Clear ||
-             pending.command == HostCommand::ClearAll ||
-             pending.command == HostCommand::ClearSlot ||
-             pending.command == HostCommand::Repair) &&
+        if (MustDisconnectComputer(pending.command) &&
             connection != BLE_HS_CONN_HANDLE_NONE)
             ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
         else

@@ -30,6 +30,7 @@ struct ble_hs_adv_fields {
 struct ble_gap_adv_params {int conn_mode=0,disc_mode=0;};
 struct {int adv_stage=0,adv_rc=0;} host_diagnostics;
 bool synced=true,configured=true,transition=false,active=false;
+enum class Output {Auto,Usb,Ble};Output preference=Output::Auto;
 int connection=BLE_HS_CONN_HANDLE_NONE,own_type=0,last_result=0,starts=0,stops=0;
 int64_t now=86400000000LL,advertisement_next=0;
 cube_dongle::HostEpoch host_epoch;
@@ -47,8 +48,7 @@ int ble_gap_adv_start(int,void*,int,const ble_gap_adv_params* p,int(*)(int*,void
 void SampleRadioPools(){}
 ''' + body + r'''
 int main(){
- // The advertising function has no dependency on USB/BLE output preference or
- // a pairing-window timer, so an empty slot advertises even after a day's idle.
+ // AUTO/BLE keep open-slot pairing after a day's idle, without a window timer.
  Advertise();assert(active&&starts==1);
  Advertise();assert(starts==1); // No redundant start while already advertising.
  // Adopting a computer stops surplus advertising; keep both split links alone.
@@ -59,6 +59,10 @@ int main(){
  transition=true;active=false;now+=250000;Advertise();assert(starts==2);
  transition=false;synced=false;Advertise();assert(starts==2);
  synced=true;Advertise();assert(active&&starts==3);
+ // Explicit USB is now exclusive, unlike AUTO with USB attached.
+ preference=Output::Usb;active=false;now+=250000;
+ Advertise();assert(!active&&starts==3);
+ preference=Output::Ble;Advertise();assert(active&&starts==4);
 }
 '''
         with tempfile.TemporaryDirectory() as tmp:

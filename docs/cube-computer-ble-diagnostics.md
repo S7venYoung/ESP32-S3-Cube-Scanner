@@ -1,5 +1,21 @@
 # Computer BLE pairing and HID diagnostics
 
+## Explicit USB is exclusive (PAIR-POLICY=3)
+
+This supersedes the policy below only for explicit USB selection. OUT_USB waits
+for the existing neutral-input/release barrier, terminates the computer connection,
+and commits USB routing after DISCONNECT. The pending command is preserved until
+disconnect completes. USB does not restart computer advertising; a delayed CONNECT
+is terminated rather than reopening that endpoint. The split central remains up:
+neither keyboard connection nor any bonding record is cleared.
+
+AUTO retains USB preference with BLE availability; BLE/slot selection restores
+computer advertising. An explicit PAIR on an empty slot selects BLE. Slot bindings,
+no-timeout empty-profile pairing and existing security checks remain unchanged.
+Tests cover USB's disconnect classification, neutral/disconnect ordering, delayed
+CONNECT rejection, explicit USB advertising suppression and return to BLE.
+Real typing and smartphone/Mac disconnect/reconnect still require hardware tests.
+
 ## ZMK-style open-profile advertising (PAIR-POLICY=2)
 
 An empty selected computer slot now remains open for pairing: there is no 120s
