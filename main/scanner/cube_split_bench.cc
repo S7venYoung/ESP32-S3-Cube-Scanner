@@ -576,6 +576,8 @@ void PumpRelayJobs() {
     }
 }
 void Fail(Peer& peer, const char* reason) {
+    split_diagnostics[Side(peer)].LocalClose(esp_timer_get_time() / 1000,
+        static_cast<unsigned>(peer.phase), std::strcmp(reason, "handshake timeout") == 0 ? 2 : 1);
     split_diagnostics[Side(peer)].failed_phase = static_cast<int>(peer.phase);
     relay_ready.fetch_and(~(1u << Side(peer)));
     ESP_LOGW(kTag, "%s: %s", Side(peer) ? "right" : "left", reason);
@@ -596,6 +598,7 @@ void Fail(Peer& peer, const char* reason) {
     ble_npl_callout_stop(&peer.timeout);
     const int rc = ble_gap_terminate(peer.connection, BLE_ERR_REM_USER_CONN_TERM);
     if (rc == BLE_HS_ENOTCONN) {
+        split_diagnostics[Side(peer)].LinkAlreadyGone();
         peer.connection = BLE_HS_CONN_HANDLE_NONE;
         peer.phase = Phase::Idle;
         peer.learning = false;
@@ -619,6 +622,7 @@ bool Snapshot(Peer& peer, os_mbuf* mbuf) {
     for (size_t i = 0; i < sizeof(bytes); ++i)
         if (bytes[i] & ~owners[Side(peer)][i])
             return false;
+    split_diagnostics[Side(peer)].Position(esp_timer_get_time() / 1000);
     if (peer.learning && !peer.configured) {
         std::memcpy(peer.pending_positions.data(), bytes, sizeof(bytes));
         return true;
@@ -819,6 +823,7 @@ int OnRead(uint16_t conn, const ble_gatt_error* error, ble_gatt_attr* attr, void
         ESP_LOGI(kTag, "%s automatic binding saved", Side(*peer) ? "right" : "left");
     }
     peer->phase = Phase::Ready;
+    split_diagnostics[Side(*peer)].Ready(esp_timer_get_time() / 1000);
     PublishStatus();
     ble_npl_callout_stop(&peer->timeout);
     OptionalSubscribe(*peer);
@@ -992,6 +997,8 @@ void Connect(Peer& peer) {
         ble_gap_connect(own_address_type, &peer.address, 10000, &params, OnGap, Cookie(Side(peer)));
     if (rc) {
         ESP_LOGW(kTag, "%s connect start failed rc=%d", Side(peer) ? "right" : "left", rc);
+        split_diagnostics[Side(peer)].ConnectFailed(esp_timer_get_time() / 1000, rc,
+            static_cast<unsigned>(peer.phase), 1);
         split_diagnostics[Side(peer)].last_error = rc;
         peer.phase = Phase::Idle;
         peer.learning = false;
@@ -1076,6 +1083,8 @@ int OnGap(ble_gap_event* event, void* arg) {
     if (event->type == BLE_GAP_EVENT_CONNECT) {
         connecting = false;
         if (event->connect.status) {
+            split_diagnostics[cookie & 1].ConnectFailed(esp_timer_get_time() / 1000,
+                event->connect.status, static_cast<unsigned>(peer.phase), 2);
             split_diagnostics[cookie & 1].last_error = event->connect.status;
             split_diagnostics[cookie & 1].failed_phase = static_cast<int>(peer.phase);
             ESP_LOGW(kTag, "%s connect failed status=%d", (cookie & 1) ? "right" : "left",
@@ -1085,6 +1094,7 @@ int OnGap(ble_gap_event* event, void* arg) {
             peer.retry_after = esp_timer_get_time() + 1000000;
         } else {
             ESP_LOGI(kTag, "%s connected; securing", (cookie & 1) ? "right" : "left");
+            split_diagnostics[cookie & 1].Connected(esp_timer_get_time() / 1000);
             peer.connection = event->connect.conn_handle;
             peer.phase = Phase::Security;
             peer.security_started = false;
@@ -1105,6 +1115,8 @@ int OnGap(ble_gap_event* event, void* arg) {
     } else if (event->type == BLE_GAP_EVENT_DISCONNECT &&
                peer.connection == event->disconnect.conn.conn_handle) {
         split_diagnostics[cookie & 1].last_error = event->disconnect.reason;
+        split_diagnostics[cookie & 1].Disconnected(esp_timer_get_time() / 1000,
+            event->disconnect.reason, static_cast<unsigned>(peer.phase));
         split_diagnostics[cookie & 1].failed_phase = static_cast<int>(peer.phase);
         input.Disconnect(cookie & 1);
 #if CONFIG_CUBE_STUDIO_RPC
@@ -1276,6 +1288,8 @@ void OnSync() {
     Scan(nullptr);
 }
 void OnReset(int reason) {
+    for (auto& diagnostics : split_diagnostics)
+        diagnostics.HostReset(esp_timer_get_time() / 1000, reason);
     bond_store_hooks_active = false;
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioCancelMacros();
@@ -1349,6 +1363,8 @@ void PumpForget() {
                 input.Disconnect(side);
                 peer.auto_allowed = false;  // Do not immediately re-bind the device just forgotten.
                 if (peer.connection != BLE_HS_CONN_HANDLE_NONE) {
+                    split_diagnostics[side].LocalClose(esp_timer_get_time() / 1000,
+                        static_cast<unsigned>(peer.phase), 3);
                     peer.phase = Phase::Closing;
                     const auto rc = ble_gap_terminate(peer.connection, BLE_ERR_REM_USER_CONN_TERM);
                     okay &= rc == 0 || rc == BLE_HS_ENOTCONN;
