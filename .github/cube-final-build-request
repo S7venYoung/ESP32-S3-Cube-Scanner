@@ -1,3 +1,3 @@
-Requested Cube USB + BLE dongle build 2026-10-30
-Source: c91d75aae3423d316f4ba1d267a44921c8564f69
-Includes scanner status broadcasts and per-half disconnect diagnostics.
+Build requested 2026-10-30: Cube USB + BLE dongle
+Source 8b12d3b26adea5f41ea0221bd7e86c85d45f9980
+Prioritized external scanner modifier/layer state broadcasts.
