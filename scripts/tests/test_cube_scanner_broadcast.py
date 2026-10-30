@@ -15,6 +15,7 @@ class BroadcastTest(unittest.TestCase):
 #include <cstdint>
 #include <cstddef>
 #include "scanner_broadcast.h"
+#include "scanner_timing.h"
 constexpr int BLE_HS_EALREADY=2, BLE_GAP_EVENT_ADV_COMPLETE=3;
 constexpr int BLE_HS_CONN_HANDLE_NONE=65535, ESP_MAC_BT=2, ESP_OK=0;
 constexpr int BLE_GAP_CONN_MODE_NON=0, BLE_GAP_DISC_MODE_GEN=2, BLE_HS_FOREVER=0;
@@ -48,6 +49,13 @@ int ble_gap_adv_start(int,void*,int,const ble_gap_adv_params* p,
 }
 ''' + body + r'''
 int main(){
+ cube_dongle::ScannerTiming timing;
+ assert(timing.Text(10).find("SCAN-TRY-AGE=-1")!=std::string::npos);
+ timing.Poll(100);timing.Poll(105);timing.Attempt(105,4);timing.Result(105,12);
+ assert(timing.Text(110).find("SCAN-ERRORS=1")!=std::string::npos);
+ timing.Result(115,0);
+ assert(timing.Text(120).find("SCAN-OK-AGE=5")!=std::string::npos);
+ assert(timing.Text(120).find("SCAN-CALL-GAP=5")!=std::string::npos);
  ScannerAdvertise();assert(starts==1&&scanner_advertising&&updates==1);
  for(int i=0;i<19;++i){now+=5000;ScannerAdvertise();}assert(updates==1);
  now+=5000;ScannerAdvertise();assert(updates==2&&starts==1);

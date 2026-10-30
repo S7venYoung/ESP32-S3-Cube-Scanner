@@ -26,15 +26,16 @@
 #include "../../experimental/cube_dongle/studio_transport.h"
 #include "cube_studio.h"
 #endif
+#include "../../experimental/cube_dongle/early_subscriptions.h"
 #include "../../experimental/cube_dongle/host_control.h"
 #include "../../experimental/cube_dongle/host_cycle.h"
 #include "../../experimental/cube_dongle/host_diagnostics.h"
 #include "../../experimental/cube_dongle/host_epoch.h"
-#include "../../experimental/cube_dongle/early_subscriptions.h"
 #include "../../experimental/cube_dongle/peer_binding.h"
+#include "../../experimental/cube_dongle/scanner_broadcast.h"
+#include "../../experimental/cube_dongle/scanner_timing.h"
 #include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
-#include "../../experimental/cube_dongle/scanner_broadcast.h"
 
 namespace {
 using cube_dongle::HostCommand;
@@ -347,6 +348,7 @@ void AuthorizeAfterPersistence() {
 }
 void SampleRadioPools();
 bool scanner_advertising = false;
+cube_dongle::ScannerTiming scanner_timing;
 uintptr_t scanner_epoch = 0;
 int64_t scanner_next = 0;
 uint16_t scanner_sequence = 0;
@@ -369,6 +371,7 @@ int ScannerGap(ble_gap_event* event, void* cookie) {
     return 0;
 }
 void ScannerAdvertise() {
+    scanner_timing.Poll(esp_timer_get_time() / 1000);
     // Single legacy advertising owner: computer discovery always has priority.
     if (!synced || !configured || transition || host_epoch.Pending()) return;
     if (preference != Output::Usb && connection == BLE_HS_CONN_HANDLE_NONE) return;
@@ -406,8 +409,10 @@ void ScannerAdvertise() {
     // Standard ABCD carries the live layer/modifiers understood by ms2. Never
     // spend a critical transition on the optional ABCE split-WPM packet.
     const bool split_packet = !urgent && (state.sequence % 5) == 4;
+    scanner_timing.Attempt(now / 1000, state.modifiers);
     int rc = ble_gap_adv_set_data(split_packet ? split.data() : normal.data(),
                                   split_packet ? split.size() : normal.size());
+    scanner_timing.Result(now / 1000, rc);
     if (rc) {
         scanner_retry_after = now + 10000;
         if (now >= scanner_error_log_next) {
@@ -1563,6 +1568,7 @@ std::string CubeDualStatus() {
            " SWITCHING=" + (((status & (1u << 24)) || mailbox.load()) ? "1" : "0") +
            " RESULT=" + std::to_string(last_result.load()) +
            " DONE=" + std::to_string(done_ticket.load()) +
-           " COMMAND-RESULT=" + std::to_string(command_result.load()) + host_diagnostics.Text();
+           " COMMAND-RESULT=" + std::to_string(command_result.load()) + host_diagnostics.Text() +
+           scanner_timing.Text(esp_timer_get_time() / 1000);
 }
 

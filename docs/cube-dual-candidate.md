@@ -72,3 +72,16 @@ explained by the 200 ms software gate; compare scanner RX/view timing logs and
 Cube data-update errors before declaring the end-to-end issue resolved.
 Host tests execute the production advertising routine with a fake radio; real
 radio scheduling, coexistence and display latency still need hardware testing.
+
+### Read-only Cube scanner timing
+
+`DONGLE HOST` now appends `SCAN-DIAG=1` counters, using atomic fields between the
+NimBLE writer and CDC reader. `SCAN-CALL-AGE/GAP` measure broadcaster polling;
+`SCAN-ATTEMPTS/OK/ERRORS/RC` describe data updates, and `SCAN-TRY-AGE/OK-AGE` are
+milliseconds since the latest attempt/success. `SCAN-MODS` is the Cube UI modifier
+mask used by the latest attempt (Cmd is 4 here, mapped to HID 8 on the wire).
+A successful data update is not an over-the-air transmission or reception ACK.
+Counters run for the current boot and do not change persisted configuration.
+No advertisement-frequency, local display or pairing change is made by this
+instrumentation. This requires a Cube build containing `SCAN-DIAG=1`; it cannot
+be obtained by reflashing the external scanner alone.
