@@ -25,18 +25,21 @@ bool synced=true,configured=true,transition=false,active=false,online=true;
 enum class Output {Usb,Ble};Output preference=Output::Usb;
 int connection=BLE_HS_CONN_HANDLE_NONE,own_type=0,selected=0,starts=0,stops=0,updates=0;
 int result=0;int64_t now=1000000;
+unsigned input_modifiers=4;uint8_t last_type=0,last_modifiers=0;
+[[maybe_unused]] constexpr const char* kTag="test";
+#define ESP_LOGW(...) ((void)0)
 struct { bool Pending(){return false;} } host_epoch;
 struct Status {bool online=true;unsigned active_layer=2;const char* layer="NAV";
  unsigned modifiers=4;int left_battery=40,right_battery=80,wpm=40;bool usb=true,ble=false;};
 struct Fight {int left_wpm=10,right_wpm=30;};
-Status CubeSplitKeyboardStatus(){Status s;s.online=online;return s;}
+Status CubeSplitKeyboardStatus(){Status s;s.online=online;s.modifiers=input_modifiers;return s;}
 Fight CubeSplitFightTelemetry(){return {};}
 int64_t esp_timer_get_time(){return now;}
 bool ble_gap_adv_active(){return active;}
 int ble_gap_adv_stop(){++stops;active=false;return 0;}
 int esp_read_mac(uint8_t* m,int){m[2]=1;return 0;}
 int ble_gap_adv_set_data(const uint8_t* p,size_t n){
- assert(n<=31&&p[0]==2&&p[4]==255);++updates;return result;
+ assert(n<=31&&p[0]==2&&p[4]==255);last_type=p[8];if(last_type==0xcd)last_modifiers=p[28];++updates;return result;
 }
 int ble_gap_adv_rsp_set_fields(const ble_hs_adv_fields* r){assert(r->name_len==15);return result;}
 int ble_gap_adv_start(int,void*,int,const ble_gap_adv_params* p,
@@ -48,6 +51,15 @@ int main(){
  ScannerAdvertise();assert(starts==1&&scanner_advertising&&updates==1);
  for(int i=0;i<19;++i){now+=5000;ScannerAdvertise();}assert(updates==1);
  now+=5000;ScannerAdvertise();assert(updates==2&&starts==1);
+ now+=5000;input_modifiers=0;ScannerAdvertise();
+ assert(updates==3&&last_type==0xcd&&last_modifiers==0);
+ now+=5000;input_modifiers=4;ScannerAdvertise();
+ assert(updates==4&&last_type==0xcd&&last_modifiers==8);
+ now+=5000;input_modifiers=0;result=12;ScannerAdvertise();
+ int failed_updates=updates;
+ now+=5000;result=0;ScannerAdvertise();assert(updates==failed_updates);
+ now+=5000;ScannerAdvertise();assert(updates==failed_updates+1&&last_type==0xcd&&last_modifiers==0);
+ input_modifiers=4;now+=5000;ScannerAdvertise();assert(last_type==0xcd&&last_modifiers==8);
  StopScannerAdvertising();assert(!active&&!scanner_advertising&&stops==1);
  preference=Output::Ble;now+=100000;ScannerAdvertise();assert(starts==1);
  connection=7;ScannerAdvertise();assert(starts==2&&scanner_advertising);

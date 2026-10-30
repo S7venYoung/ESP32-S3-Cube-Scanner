@@ -50,3 +50,25 @@ This is a **code-complete candidate for the requested computer HID/profile featu
 Runtime keymap editing, arbitrary macros/combos, mouse/NKRO, forwarding host LEDs to the halves and the inherited cross-hand bootloader combo are still outside this static-keymap adapter. The original ZMK branches remain untouched.
 
 The GATT/GAP integration follows the [Espressif NimBLE peripheral example](https://github.com/espressif/esp-idf/tree/v6.1/examples/bluetooth/nimble/blehr), while retaining the existing allowlisted split client.
+
+## External Prospector scanner responsiveness
+
+The Cube re-advertises split keyboard telemetry to the external ms2 scanner.
+Previously the 100 ms update gate applied to modifier/layer changes too, and
+ABCD status alternated equally with ABCE split-WPM. The ms2 receiver consumes
+ABCD, so normal status was refreshed only about every 200 ms before radio loss.
+
+Modifier, layer, profile and USB/BLE output changes now bypass that gate and
+always publish ABCD. Stable telemetry keeps the 100 ms update pace; ABCE uses
+one in five regular sequence slots. A failed data update does not acknowledge
+the state as sent, retries after at least 10 ms, and emits a rate-limited warning
+with the NimBLE return code. BLE host reset clears the success/retry cache.
+Computer discovery priority and the existing advertising owner remain intact.
+
+This does not guarantee reception of every quick press: a payload update is not
+an acknowledgement from the scanner, and a state can change between radio
+advertising events. The approximately two-second hardware delay is not fully
+explained by the 200 ms software gate; compare scanner RX/view timing logs and
+Cube data-update errors before declaring the end-to-end issue resolved.
+Host tests execute the production advertising routine with a fake radio; real
+radio scheduling, coexistence and display latency still need hardware testing.

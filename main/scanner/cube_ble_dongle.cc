@@ -351,6 +351,10 @@ uintptr_t scanner_epoch = 0;
 int64_t scanner_next = 0;
 uint16_t scanner_sequence = 0;
 uint32_t scanner_id = 0;
+cube_dongle::ScannerState scanner_last_state;
+bool scanner_status_valid = false;
+int64_t scanner_error_log_next = 0;
+int64_t scanner_retry_after = 0;
 void StopScannerAdvertising() {
     if (!scanner_advertising) return;
     const int rc = ble_gap_adv_stop();
@@ -369,8 +373,8 @@ void ScannerAdvertise() {
     if (!synced || !configured || transition || host_epoch.Pending()) return;
     if (preference != Output::Usb && connection == BLE_HS_CONN_HANDLE_NONE) return;
     const auto now = esp_timer_get_time();
-    if (now < scanner_next) return;
-    scanner_next = now + 100000;
+    if (now < scanner_retry_after)
+        return;
     if (scanner_advertising && !ble_gap_adv_active()) scanner_advertising = false;
     const auto status = CubeSplitKeyboardStatus();
     if (!status.online) { StopScannerAdvertising(); return; }
@@ -381,6 +385,13 @@ void ScannerAdvertise() {
         scanner_id = uint32_t(mac[2]) | uint32_t(mac[3]) << 8 |
                      uint32_t(mac[4]) << 16 | uint32_t(mac[5]) << 24;
     }
+    const bool urgent = !scanner_status_valid || status.active_layer != scanner_last_state.layer ||
+                        status.modifiers != scanner_last_state.modifiers ||
+                        selected != scanner_last_state.profile ||
+                        status.usb != scanner_last_state.usb ||
+                        status.ble != scanner_last_state.ble;
+    if (!urgent && now < scanner_next)
+        return;
     const auto fight = CubeSplitFightTelemetry();
     cube_dongle::ScannerState state;
     state.id = scanner_id; state.sequence = scanner_sequence++;
@@ -392,10 +403,25 @@ void ScannerAdvertise() {
     state.links = status.ble ? 1 : 0;
     const auto normal = cube_dongle::ScannerStatusPacket(state);
     const auto split = cube_dongle::ScannerFightPacket(state);
-    const bool split_packet = (state.sequence & 1) != 0;
+    // Standard ABCD carries the live layer/modifiers understood by ms2. Never
+    // spend a critical transition on the optional ABCE split-WPM packet.
+    const bool split_packet = !urgent && (state.sequence % 5) == 4;
     int rc = ble_gap_adv_set_data(split_packet ? split.data() : normal.data(),
                                   split_packet ? split.size() : normal.size());
-    if (rc || scanner_advertising) return;
+    if (rc) {
+        scanner_retry_after = now + 10000;
+        if (now >= scanner_error_log_next) {
+            ESP_LOGW(kTag, "Scanner advertising data update failed rc=%d", rc);
+            scanner_error_log_next = now + 1000000;
+        }
+        return;
+    }
+    scanner_retry_after = 0;
+    scanner_last_state = state;
+    scanner_status_valid = true;
+    scanner_next = now + 100000;
+    if (scanner_advertising)
+        return;
     ble_hs_adv_fields response{};
     // Preserve the computer-facing device name on the shared BLE address.
     const char name[] = "Cube Velvet Pro";
@@ -1225,6 +1251,9 @@ void CubeBleHostReset() {
     ++scanner_epoch;
     scanner_advertising = false;
     scanner_next = 0;
+    scanner_status_valid = false;
+    scanner_retry_after = 0;
+    scanner_error_log_next = 0;
     early_subscriptions.Clear();
     advertisement_stop_next = 0;
     repair_candidate.valid = false;
