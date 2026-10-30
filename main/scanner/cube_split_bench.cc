@@ -371,6 +371,7 @@ void PublishStatus() {
 #endif
     KeyboardStatus status;
     status.online = fight.online;
+    status.active_layer = keyboard.ActiveLayer();
 #if CONFIG_CUBE_STUDIO_RPC
     CubeStudioLayerName(keyboard.ActiveLayer(), status.layer, sizeof(status.layer));
 #else
@@ -1564,3 +1565,4 @@ bool CubeSplitUpdateHostMetrics(const uint8_t* data, size_t size) {
     std::lock_guard<std::mutex> lock(dashboard_mutex);
     return dashboard.Update(data, size, esp_timer_get_time() / 1000);
 }
+

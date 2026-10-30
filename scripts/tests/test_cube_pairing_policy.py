@@ -29,7 +29,7 @@ struct ble_hs_adv_fields {
 };
 struct ble_gap_adv_params {int conn_mode=0,disc_mode=0;};
 struct {int adv_stage=0,adv_rc=0;} host_diagnostics;
-bool synced=true,configured=true,transition=false,active=false;
+bool synced=true,configured=true,transition=false,active=false,scanner_advertising=false;
 enum class Output {Auto,Usb,Ble};Output preference=Output::Auto;
 int connection=BLE_HS_CONN_HANDLE_NONE,own_type=0,last_result=0,starts=0,stops=0;
 int64_t now=86400000000LL,advertisement_next=0;
@@ -37,6 +37,7 @@ cube_dongle::HostEpoch host_epoch;
 int64_t esp_timer_get_time(){return now;}
 bool ble_gap_adv_active(){return active;}
 void StopConnectedAdvertising(){if(connection!=BLE_HS_CONN_HANDLE_NONE&&active){active=false;++stops;}}
+void StopScannerAdvertising(){if(scanner_advertising){scanner_advertising=false;active=false;}}
 int ble_gap_adv_set_fields(const ble_hs_adv_fields*){return 0;}
 int ble_svc_gap_device_name_set(const char*){return 0;}
 int ble_gap_adv_rsp_set_fields(const ble_hs_adv_fields*){return 0;}
@@ -97,3 +98,4 @@ int main(){
 
 if __name__ == '__main__':
     unittest.main()
+

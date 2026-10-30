@@ -17,7 +17,7 @@ class ConnectedAdvertisingTests(unittest.TestCase):
 constexpr int BLE_HS_CONN_HANDLE_NONE=0xffff, BLE_HS_EALREADY=2;
 int connection=BLE_HS_CONN_HANDLE_NONE, calls=0, stop_result=0;
 int64_t now=1000000, advertisement_stop_next=0;
-bool active=true;
+bool active=true,scanner_advertising=false;
 struct { int adv_stop_rc=-1; } host_diagnostics;
 int64_t esp_timer_get_time(){return now;}
 bool ble_gap_adv_active(){return active;}
@@ -28,6 +28,9 @@ int main(){
  // Initial pairing must remain discoverable without a computer connection.
  StopConnectedAdvertising();assert(active&&calls==0);
  connection=7;
+ scanner_advertising=true;
+ StopConnectedAdvertising();assert(active&&calls==0);
+ scanner_advertising=false;
  StopConnectedAdvertising();assert(!active&&calls==1&&host_diagnostics.adv_stop_rc==0);
  // No recurring stop calls once the advertisement is gone.
  for(int i=0;i<100;++i)StopConnectedAdvertising();
@@ -70,3 +73,4 @@ int main(){
 
 if __name__ == '__main__':
     unittest.main()
+

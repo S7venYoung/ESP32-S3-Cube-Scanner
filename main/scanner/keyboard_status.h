@@ -4,6 +4,7 @@
 
 struct KeyboardStatus {
     bool online = false;
+    uint8_t active_layer = 0;
     char layer[17] = {};
     int profile = -1, wpm = -1;
     bool usb = false, ble = false;
@@ -16,6 +17,7 @@ inline bool ParseKeyboardStatus(const uint8_t* data, size_t size, KeyboardStatus
         return false;
     KeyboardStatus value;
     value.online = true;
+    value.active_layer = data[6];
     value.modifiers = mods;
     std::memcpy(value.layer, data + 15, 4);
     for (int i = 0; i < 4; ++i) {
@@ -36,3 +38,4 @@ inline bool ParseKeyboardStatus(const uint8_t* data, size_t size, KeyboardStatus
     return true;
 }
 KeyboardStatus GetKeyboardStatus();
+

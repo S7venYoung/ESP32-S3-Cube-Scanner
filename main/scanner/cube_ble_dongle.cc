@@ -2,6 +2,7 @@
 #include "application.h"
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_mac.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <host/ble_att.h>
@@ -33,6 +34,7 @@
 #include "../../experimental/cube_dongle/peer_binding.h"
 #include "cube_split_bench.h"
 #include "cube_usb_dongle.h"
+#include "../../experimental/cube_dongle/scanner_broadcast.h"
 
 namespace {
 using cube_dongle::HostCommand;
@@ -344,11 +346,76 @@ void AuthorizeAfterPersistence() {
     }
 }
 void SampleRadioPools();
+bool scanner_advertising = false;
+uintptr_t scanner_epoch = 0;
+int64_t scanner_next = 0;
+uint16_t scanner_sequence = 0;
+uint32_t scanner_id = 0;
+void StopScannerAdvertising() {
+    if (!scanner_advertising) return;
+    const int rc = ble_gap_adv_stop();
+    if (!rc || rc == BLE_HS_EALREADY) {
+        scanner_advertising = false;
+        ++scanner_epoch;
+    }
+}
+int ScannerGap(ble_gap_event* event, void* cookie) {
+    if (event->type == BLE_GAP_EVENT_ADV_COMPLETE &&
+        reinterpret_cast<uintptr_t>(cookie) == scanner_epoch) scanner_advertising = false;
+    return 0;
+}
+void ScannerAdvertise() {
+    // Single legacy advertising owner: computer discovery always has priority.
+    if (!synced || !configured || transition || host_epoch.Pending()) return;
+    if (preference != Output::Usb && connection == BLE_HS_CONN_HANDLE_NONE) return;
+    const auto now = esp_timer_get_time();
+    if (now < scanner_next) return;
+    scanner_next = now + 100000;
+    if (scanner_advertising && !ble_gap_adv_active()) scanner_advertising = false;
+    const auto status = CubeSplitKeyboardStatus();
+    if (!status.online) { StopScannerAdvertising(); return; }
+    if (!scanner_advertising && ble_gap_adv_active()) return;
+    if (!scanner_id) {
+        uint8_t mac[6]{};
+        if (esp_read_mac(mac, ESP_MAC_BT) != ESP_OK) return;
+        scanner_id = uint32_t(mac[2]) | uint32_t(mac[3]) << 8 |
+                     uint32_t(mac[4]) << 16 | uint32_t(mac[5]) << 24;
+    }
+    const auto fight = CubeSplitFightTelemetry();
+    cube_dongle::ScannerState state;
+    state.id = scanner_id; state.sequence = scanner_sequence++;
+    state.layer = status.active_layer; state.layer_name = status.layer;
+    state.profile = selected; state.modifiers = status.modifiers;
+    state.left_battery = status.left_battery; state.right_battery = status.right_battery;
+    state.wpm = status.wpm; state.left_wpm = fight.left_wpm; state.right_wpm = fight.right_wpm;
+    state.usb = status.usb; state.ble = status.ble;
+    state.links = status.ble ? 1 : 0;
+    const auto normal = cube_dongle::ScannerStatusPacket(state);
+    const auto split = cube_dongle::ScannerFightPacket(state);
+    const bool split_packet = (state.sequence & 1) != 0;
+    int rc = ble_gap_adv_set_data(split_packet ? split.data() : normal.data(),
+                                  split_packet ? split.size() : normal.size());
+    if (rc || scanner_advertising) return;
+    ble_hs_adv_fields response{};
+    // Preserve the computer-facing device name on the shared BLE address.
+    const char name[] = "Cube Velvet Pro";
+    response.name = reinterpret_cast<const uint8_t*>(name);
+    response.name_len = sizeof(name) - 1; response.name_is_complete = 1;
+    rc = ble_gap_adv_rsp_set_fields(&response);
+    if (rc) return;
+    ble_gap_adv_params params{};
+    params.conn_mode = BLE_GAP_CONN_MODE_NON;
+    params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    params.itvl_min = params.itvl_max = 0x50;  // 50 ms; no extra connection.
+    rc = ble_gap_adv_start(own_type, nullptr, BLE_HS_FOREVER, &params, ScannerGap,
+                           reinterpret_cast<void*>(++scanner_epoch));
+    scanner_advertising = rc == 0;
+}
 void StopConnectedAdvertising() {
     // The SDK may start a replacement advertisement before delivering the first
     // CONNECT. Merely returning from Advertise() leaves that advertisement live
     // after the computer is adopted, competing with split connection attempts.
-    if (connection == BLE_HS_CONN_HANDLE_NONE || !ble_gap_adv_active())
+    if (scanner_advertising || connection == BLE_HS_CONN_HANDLE_NONE || !ble_gap_adv_active())
         return;
     const auto now = esp_timer_get_time();
     if (now < advertisement_stop_next)
@@ -360,6 +427,10 @@ void StopConnectedAdvertising() {
         ESP_LOGW(kTag, "Connected computer advertising stop failed rc=%d", rc);
 }
 void Advertise() {
+    if (preference != Output::Usb && connection == BLE_HS_CONN_HANDLE_NONE) {
+        StopScannerAdvertising();
+        if (scanner_advertising) return;
+    }
     StopConnectedAdvertising();
     if (!synced || !configured || preference == Output::Usb ||
         connection != BLE_HS_CONN_HANDLE_NONE || transition ||
@@ -976,6 +1047,7 @@ void BeginTransition(HostRequest request) {
     barrier.Begin();
     CubeUsbRelease();
     ReleaseBle();
+    StopScannerAdvertising();
     ble_gap_adv_stop();
 }
 bool MustDisconnectComputer(HostCommand command) {
@@ -1150,6 +1222,9 @@ void CubeBleHostSync(uint8_t type) {
     Advertise();
 }
 void CubeBleHostReset() {
+    ++scanner_epoch;
+    scanner_advertising = false;
+    scanner_next = 0;
     early_subscriptions.Clear();
     advertisement_stop_next = 0;
     repair_candidate.valid = false;
@@ -1248,6 +1323,7 @@ void CubeDualTick() {
             CubeUsbSubmit(output);
     }
     Advertise();
+    ScannerAdvertise();
     Pump();
     Publish();
 }
@@ -1460,3 +1536,4 @@ std::string CubeDualStatus() {
            " DONE=" + std::to_string(done_ticket.load()) +
            " COMMAND-RESULT=" + std::to_string(command_result.load()) + host_diagnostics.Text();
 }
+
