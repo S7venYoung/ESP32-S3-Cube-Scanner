@@ -78,11 +78,14 @@ int main(){
 
     def test_pairing_priority_and_reset(self):
         source = (ROOT / 'main/scanner/cube_ble_dongle.cc').read_text()
-        self.assertIn('scanner_advertising || connection == BLE_HS_CONN_HANDLE_NONE', source)
-        self.assertIn('if (preference != Output::Usb && connection == BLE_HS_CONN_HANDLE_NONE) return;', source)
-        self.assertIn('StopScannerAdvertising();\n        if (scanner_advertising) return;', source)
-        self.assertIn('ScannerAdvertise();\n    Pump();', source)
-        self.assertIn('scanner_advertising = false;\n    scanner_next = 0;', source)
+        compact = ''.join(source.split())
+        for expected in [
+                'scanner_advertising || connection == BLE_HS_CONN_HANDLE_NONE',
+                'if (preference != Output::Usb && connection == BLE_HS_CONN_HANDLE_NONE) return;',
+                'StopScannerAdvertising(); if (scanner_advertising) return;',
+                'ScannerAdvertise(); Pump();',
+                'scanner_advertising = false; scanner_next = 0;']:
+            self.assertIn(''.join(expected.split()), compact)
 
 if __name__ == '__main__':
     unittest.main()
