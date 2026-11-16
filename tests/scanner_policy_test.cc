@@ -7,6 +7,7 @@ int main() {
     assert(timing.window * 4 == timing.interval);
     timing = scanner_policy::Timing(false, true);
     assert(timing.window * 8 == timing.interval);
+    assert((timing.interval - timing.window) * 625 <= 20000);
     const auto hot_voice = scanner_policy::Timing(true, true);
     assert(hot_voice.window == timing.window && hot_voice.interval == timing.interval);
     assert(scanner_policy::kScanSliceMs == 1000 && scanner_policy::kScanRestartMs == 1);
@@ -41,3 +42,4 @@ int main() {
     retry.Healthy();
     assert(retry.FailureDelayMs() == 1000);
 }
+

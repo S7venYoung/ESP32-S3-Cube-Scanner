@@ -15,8 +15,8 @@ struct ScanTiming {
 // Match the original observer's requested full window while idle. S3 shares
 // its radio with Wi-Fi, so leave room for active Xiaozhi voice/network setup.
 constexpr ScanTiming Timing(bool voice_active, bool hot = false) {
-    return hot            ? ScanTiming{0x100, 0x20}
-           : voice_active ? ScanTiming{0x60, 0x18}
+    return hot            ? ScanTiming{0x20, 0x04}
+           : voice_active ? ScanTiming{0x20, 0x08}
                           : ScanTiming{0x30, 0x30};
 }
 constexpr int kScanSliceMs = 1000;
@@ -107,3 +107,4 @@ private:
     unsigned attempts_ = 0;
 };
 }  // namespace scanner_policy
+

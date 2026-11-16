@@ -203,7 +203,7 @@ void CodexScannerDisplay::SetupUI() {
             static_cast<CodexScannerDisplay*>(lv_timer_get_user_data(timer))
                 ->PollKeyboardPriority();
         },
-        50, this);
+        20, this);
     if (input_timer)
         lv_obj_add_event_cb(
             dashboard_,
@@ -685,4 +685,5 @@ void CodexScannerDisplay::UpdateScanner(const std::vector<ScannerDevice>& device
     (void)scanning;
     (void)filter;
 }
+
 

@@ -24,7 +24,7 @@ class ScannerResponsiveness(unittest.TestCase):
     def test_fast_timer_and_voice_thermal_budget(self):
         code = (ROOT / 'main/scanner/codex_scanner_display.cc').read_text()
         self.assertIn('PollKeyboardPriority()', code)
-        self.assertIn('50, this', code)
+        self.assertIn('20, this', code)
         self.assertIn('LV_EVENT_DELETE, input_timer', code)
         poll = code.split('void CodexScannerDisplay::PollKeyboardPriority()',1)[1].split('void CodexScannerDisplay::UpdateKeyboardThemes()',1)[0]
         self.assertNotIn('DisplayLockGuard', poll) # LVGL already owns the lock.
@@ -37,3 +37,4 @@ class ScannerResponsiveness(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
