@@ -8,6 +8,7 @@
 #include "arcade_sprites.h"
 #include "arcade_text.h"
 #include "codex_metrics.h"
+#include "codex_draw.h"
 #include "fight_telemetry.h"
 #include "modifier_timeline.h"
 
@@ -18,6 +19,7 @@ struct Scene {
     lv_obj_t *root, *quota[2], *health[2], *rage[2], *fighter[2], *effect[2];
     lv_obj_t *total, *transport, *cube, *cube_fill, *keys[4], *symbols[4];
     lv_obj_t *versus, *today;
+    lv_obj_t* reset_clock = nullptr;
     ArcadeActivity activity;
     lv_timer_t* timer = nullptr;
     ArcadeMotion motion[2];
@@ -138,16 +140,21 @@ lv_obj_t* ArcadeCreate(lv_obj_t* parent) {
     s->cube_fill = Box(cube_icon, 2, 2, 12, 6, 0x25CF60, 1);
     s->cube = StatusLabel(s->root, "--%", 205, 34, white);
     for (int i = 0; i < 2; ++i) {
-        const int x = i == 0 ? 6 : 126;
-        auto* frame = Box(s->root, x, 27, 108, 11, 0x191918, 3);
+        const int x = i == 0 ? 6 : 142;
+        auto* frame = Box(s->root, x, 27, 92, 11, 0x191918, 3);
         lv_obj_set_style_border_color(frame, lv_color_hex(white), 0);
         lv_obj_set_style_border_width(frame, 1, 0);
-        s->health[i] = Box(frame, 2, 2, 104, 7, i == 0 ? red : gold, 2);
+        s->health[i] = Box(frame, 2, 2, 88, 7, i == 0 ? red : gold, 2);
         lv_obj_set_style_bg_grad_color(s->health[i], lv_color_hex(i == 0 ? gold : red), 0);
         lv_obj_set_style_bg_grad_dir(s->health[i], LV_GRAD_DIR_HOR, 0);
-        Text(s->root, i == 0 ? "5H LEFT" : "7D LEFT", x + 2, 39, 66, white, 14);
-        s->quota[i] = Text(s->root, "--%", x + 68, 39, 40, gold, 14);
+        Text(s->root, i == 0 ? "5H LEFT" : "7D LEFT", i == 0 ? 8 : 177, 39, 57, white, 14);
+        s->quota[i] = Text(s->root, "--%", i == 0 ? 65 : 142, 39, 34, gold, 14);
+        if (i == 0) {
+            for (int child = 0; child < 2; ++child)
+                lv_obj_set_style_text_align(lv_obj_get_child(s->quota[i], child), LV_TEXT_ALIGN_RIGHT, 0);
+        }
     }
+    s->reset_clock = CodexDrawText(s->root, "--:--", 99, 26, 42, gold, 14, true);
     ArcadeDojoCreate(s->root);
     // Stage is a fixed opaque image, only fighters/effects animate above it.
     auto* stage = lv_obj_create(s->root);
@@ -238,9 +245,11 @@ void ArcadeRefresh(lv_obj_t* root) {
         else
             std::snprintf(text, sizeof(text), "--%%");
         SetText(s.quota[i], text);
-        Bar(s.health[i], quota[i], 104, i == 1);
+        Bar(s.health[i], quota[i], 88, i == 1);
         ArcadeEnergySet(s.rage[i], battery[i], i == 1);
     }
+    FormatCodexReset(c.metrics, c.online, text, sizeof(text));
+    CodexDrawSetText(s.reset_clock, text);
     if (!c.online || c.metrics.tokens < 0)
         std::snprintf(text, sizeof(text), "--");
     else if (c.metrics.tokens >= 1000000)
@@ -253,3 +262,4 @@ void ArcadeRefresh(lv_obj_t* root) {
     ArcadeSetModifiers(root, GetScannerModifiers());
     Tick(s);
 }
+

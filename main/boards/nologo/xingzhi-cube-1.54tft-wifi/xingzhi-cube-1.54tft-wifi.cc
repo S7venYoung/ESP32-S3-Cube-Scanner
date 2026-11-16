@@ -92,6 +92,7 @@ private:
         rtc_gpio_init(GPIO_NUM_21);
         rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
         rtc_gpio_set_level(GPIO_NUM_21, 1);
+        rtc_gpio_hold_dis(GPIO_NUM_21);
 
 #if CONFIG_ZMK_SCANNER_MODE
         power_save_timer_ = new PowerSaveTimer(-1, -1, -1);
@@ -306,3 +307,4 @@ public:
 };
 
 DECLARE_BOARD(XINGZHI_CUBE_1_54TFT_WIFI);
+

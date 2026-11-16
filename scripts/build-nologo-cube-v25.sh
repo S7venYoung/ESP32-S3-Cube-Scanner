@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 python -m unittest discover -s scripts/tests -q
+for extra in arcade_energy_mirror codex_reset_time; do
+    g++ -std=c++17 -Wall -Wextra -Werror "tests/${extra}_test.cc" -o "/tmp/scanner-${extra}-test"
+    "/tmp/scanner-${extra}-test"
+done
 g++ -std=c++17 -Wall -Wextra -Werror tests/arcade_token_text_test.cc -o /tmp/arcade-token-text-test
 /tmp/arcade-token-text-test
 g++ -std=c++17 -Wall -Wextra -Werror tests/modifier_timeline_test.cc -o /tmp/modifier-timeline-test

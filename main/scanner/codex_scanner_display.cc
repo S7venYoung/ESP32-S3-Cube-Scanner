@@ -102,7 +102,15 @@ void CodexScannerDisplay::SetupUI() {
     auto* right = Outline(dashboard_, 122, 44, 112, 126, kYellow, 12);
     Impact(right, "TODAY TOTAL", 6, 6, 100, kPaper);
     tokens_text_ = Impact(right, "--", 2, 38, 106, kPaper, 48, true);
-    Impact(right, "TOKENS", 6, 98, 98, kMuted, 16, true);
+    Panel(right, 14, 100, 10, 1, kMuted, 0);
+    Panel(right, 14, 112, 10, 1, kMuted, 0);
+    for (int i = 0; i < 6; ++i) {
+        Panel(right, 14 + i / 2, 101 + i, 1, 1, kMuted, 0);
+        Panel(right, 23 - i / 2, 101 + i, 1, 1, kMuted, 0);
+        Panel(right, 17 - i / 2, 107 + i, 1, 1, kMuted, 0);
+        Panel(right, 20 + i / 2, 107 + i, 1, 1, kMuted, 0);
+    }
+    reset_time_text_ = Impact(right, "--:--", 31, 97, 73, kMuted, 16, true);
 
     auto* state = Outline(dashboard_, 6, 177, 228, 25, kMuted, 7);
     codex_keyboard_transport_ = Impact(state, "--", 7, 4, 42, kMuted);
@@ -145,9 +153,18 @@ void CodexScannerDisplay::SetupUI() {
     lv_obj_add_flag(assistant_overlay_, LV_OBJ_FLAG_HIDDEN);
 
     // Native setup/activation notices and hardware alarms remain above it.
-    notice_panel_ = Panel(dashboard_, 8, 181, 224, 51, kYellow);
-    notice_text_ = Text(notice_panel_, "", 7, 5, 210, kInk);
-    lv_obj_set_height(notice_text_, 43);
+    notice_panel_ = Panel(dashboard_, 8, 208, 224, 24, kYellow);
+    notice_text_ = Text(notice_panel_, "", 8, 5, 208, kInk);
+    const lv_font_t* notice_font = LV_FONT_DEFAULT;
+    const int notice_height = static_cast<int>(notice_font->line_height);
+    const int notice_scale = std::max(1, 14 * 256 / std::max(1, notice_height));
+    lv_obj_set_style_text_font(notice_text_, notice_font, 0);
+    lv_obj_set_size(notice_text_, 208 * 256 / notice_scale, notice_height);
+    lv_obj_set_style_transform_pivot_x(notice_text_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(notice_text_, 0, 0);
+    lv_obj_set_style_transform_scale_x(notice_text_, notice_scale, 0);
+    lv_obj_set_style_transform_scale_y(notice_text_, notice_scale, 0);
+    lv_label_set_long_mode(notice_text_, LV_LABEL_LONG_DOT);
     lv_obj_add_flag(notice_panel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(low_battery_popup_);
     high_temp_popup_ = Panel(lv_screen_active(), 8, 184, 224, 48, kRed, 10);
@@ -492,6 +509,8 @@ void CodexScannerDisplay::UpdateMetrics() {
             std::snprintf(text, sizeof(text), "%lld",
                           static_cast<long long>(sample.metrics.tokens));
         CodexDrawSetText(tokens_text_, text);
+        FormatCodexReset(sample.metrics, sample.online, text, sizeof(text));
+        CodexDrawSetText(reset_time_text_, text);
     }
     UpdateKeyboardThemes();
     UpdateMacintosh();
@@ -666,3 +685,4 @@ void CodexScannerDisplay::UpdateScanner(const std::vector<ScannerDevice>& device
     (void)scanning;
     (void)filter;
 }
+

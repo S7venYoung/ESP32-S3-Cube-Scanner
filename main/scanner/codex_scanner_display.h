@@ -65,6 +65,7 @@ private:
     lv_obj_t* quota_text_ = nullptr;
     lv_obj_t* week_text_ = nullptr;
     lv_obj_t* tokens_text_ = nullptr;
+    lv_obj_t* reset_time_text_ = nullptr;
     lv_obj_t* week_segments_[6] = {};
     lv_obj_t* dashboard_ = nullptr;
     lv_obj_t* codex_dashboard_ = nullptr;
@@ -87,3 +88,4 @@ private:
     lv_obj_t* notice_text_ = nullptr;
     int64_t notice_until_us_ = 0;
 };
+

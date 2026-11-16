@@ -1,6 +1,9 @@
 name: Build Nologo Xingzhi Cube Codex v2.5
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/nologo-xingzhi-cube-154]
+    paths: [.github/cube-scanner-build-request]
 permissions:
   contents: write
 concurrency:
@@ -52,3 +55,4 @@ jobs:
             build/SCANNER-VELVET46.md
           if-no-files-found: error
           retention-days: 30
+

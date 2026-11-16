@@ -117,6 +117,7 @@ void SyncTask(void*) {
                 if (!overflow) {
                     if (line == "PING") Reply("PROSPECTOR-SCANNER/1");
                     else if (line == "CAPS") Reply("CUBE-CODEX/2");
+                    else if (line == "CAPS3") Reply("CUBE-CODEX/3");
                     else if (line == "PAIR") Reply("CUBE-PAIR " + IpAddress() + " " + token);
                     else if (line.rfind("CODEX", 0) == 0) Reply(Apply(line.c_str(), true) ? "OK" : "ERR");
                 }
@@ -149,6 +150,7 @@ CodexSnapshot GetCodexSnapshot() {
         snapshot.online = true;
         if (sample->metrics.age_seconds + (now - sample->at) / 1000000 > 900) {
             snapshot.metrics.left = snapshot.metrics.week_left = -1;
+            snapshot.metrics.reset_at = -1;
         }
     }
     return snapshot;
@@ -200,3 +202,4 @@ void StartCodexSync() {
         ESP_LOGE("CodexSync", "Unable to start sync task");
     }
 }
+
