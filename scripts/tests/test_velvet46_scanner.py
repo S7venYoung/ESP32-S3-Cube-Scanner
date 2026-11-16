@@ -8,7 +8,13 @@ class Velvet46ScannerTest(unittest.TestCase):
     def test_development_pushes_do_not_consume_actions(self):
         workflow = (ROOT / '.github/workflows/build-nologo-cube-codex.yml').read_text()
         self.assertIn('workflow_dispatch:', workflow)
-        self.assertNotIn('  push:', workflow)
+        if '  push:' in workflow:
+            push = workflow.split('  push:', 1)[1].split('permissions:', 1)[0]
+            self.assertEqual(push.strip().splitlines(), [
+                'branches: [codex/nologo-xingzhi-cube-154]',
+                '    paths: [.github/cube-scanner-build-request]',
+            ])
+            self.assertNotIn('pull_request:', workflow)
 
     def test_target_config(self):
         config = json.loads((ROOT / 'main/boards/nologo/xingzhi-cube-1.54tft-wifi/config.json').read_text())

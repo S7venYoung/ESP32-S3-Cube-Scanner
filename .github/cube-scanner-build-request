@@ -1,2 +1,2 @@
-2026-11-16 user requested scanner UI/reset-clock sync and build.
-Base 9ed80ee047a66e9debe3b8744f1c27cb418b4fa1
+2026-11-16 rebuild scanner after validating explicit branch/path build gate.
+Source 056f3699ed7701c72d058ae3110e82c6ef29659a
